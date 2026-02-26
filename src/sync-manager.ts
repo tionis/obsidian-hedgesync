@@ -1,6 +1,8 @@
-import {Notice, TAbstractFile, TFile} from "obsidian";
+import {Editor, Menu, Notice, TAbstractFile, TFile} from "obsidian";
+import {buildNoteUrl, HedgeDocClient, parseNoteUrl} from "hedgesync/obsidian";
 import {requestConfirmation} from "./confirmation-modal";
 import {HedgeDocReferenceError, mergeMarkdownContent, resolveHedgeDocReference, splitMarkdownContent} from "./frontmatter";
+import {requestHedgeDocImport} from "./hedgedoc-import-modal";
 import {HedgeDocSyncService} from "./hedgedoc-sync-service";
 import type ObsidianHedgeSyncPlugin from "./main";
 import type {HedgeDocReference} from "./types";
@@ -26,19 +28,25 @@ interface PullOptions {
 	stripRemoteFrontmatter: boolean;
 }
 
+interface LiveSyncSession {
+	filePath: string;
+	reference: HedgeDocReference;
+	client: HedgeDocClient;
+	localSyncTimerId: number | null;
+	writeQueue: Promise<void>;
+	onDocument: () => void;
+	onError: (error: unknown) => void;
+	onDelete: () => void;
+}
+
 export class SyncManager {
 	private readonly plugin: ObsidianHedgeSyncPlugin;
 	private readonly syncService: HedgeDocSyncService;
 	private readonly pushTimers = new Map<string, number>();
 	private readonly activePushes = new Set<string>();
 	private readonly suppressAutoPushUntil = new Map<string, number>();
-	private liveSyncFilePath: string | null = null;
-	private liveSyncPullTimerId: number | null = null;
 	private bulkPullInProgress = false;
-	private pushQuickActionEl: HTMLElement | null = null;
-	private pullQuickActionEl: HTMLElement | null = null;
-	private liveQuickActionEl: HTMLElement | null = null;
-	private quickActionsRefreshSeq = 0;
+	private liveSession: LiveSyncSession | null = null;
 
 	constructor(plugin: ObsidianHedgeSyncPlugin, syncService: HedgeDocSyncService) {
 		this.plugin = plugin;
@@ -47,29 +55,21 @@ export class SyncManager {
 
 	register(): void {
 		this.registerCommands();
-		this.registerQuickActions();
+		this.registerContextMenus();
 
 		this.plugin.registerEvent(this.plugin.app.vault.on("modify", (file) => {
 			void this.handleVaultModify(file);
 		}));
+
 		this.plugin.registerEvent(this.plugin.app.vault.on("rename", (file, oldPath) => {
 			this.handleFileRename(file, oldPath);
 		}));
+
 		this.plugin.registerEvent(this.plugin.app.vault.on("delete", (file) => {
 			this.handleFileDelete(file);
 		}));
-		this.plugin.registerEvent(this.plugin.app.workspace.on("file-open", () => {
-			void this.updateQuickActions();
-		}));
-		this.plugin.registerEvent(this.plugin.app.metadataCache.on("changed", (file) => {
-			const activeFile = this.getActiveMarkdownFile();
-			if (activeFile !== null && activeFile.path === file.path) {
-				void this.updateQuickActions();
-			}
-		}));
 
 		this.plugin.register(() => this.dispose());
-		void this.updateQuickActions();
 	}
 
 	dispose(): void {
@@ -79,15 +79,19 @@ export class SyncManager {
 		this.pushTimers.clear();
 		this.activePushes.clear();
 		this.suppressAutoPushUntil.clear();
-		this.clearLiveSyncPullTimer();
-		this.liveSyncFilePath = null;
+		this.stopLiveSync(null);
 	}
 
 	onSettingsChanged(): void {
-		if (this.liveSyncFilePath !== null) {
-			this.scheduleLiveSyncPull();
+		const liveSession = this.liveSession;
+		if (liveSession === null) {
+			return;
 		}
-		void this.updateQuickActions();
+
+		if (liveSession.localSyncTimerId !== null) {
+			window.clearTimeout(liveSession.localSyncTimerId);
+			liveSession.localSyncTimerId = null;
+		}
 	}
 
 	private registerCommands(): void {
@@ -166,41 +170,83 @@ export class SyncManager {
 				void this.pullAllLinkedNotesFromVault();
 			},
 		});
+
+		this.plugin.addCommand({
+			id: "create-hedgedoc-document-from-active-note",
+			name: "Create hedgedoc document from active note",
+			checkCallback: (checking) => {
+				const file = this.getActiveMarkdownFile();
+				if (file === null) {
+					return false;
+				}
+
+				if (!checking) {
+					void this.createHedgeDocDocumentFromFile(file);
+				}
+
+				return true;
+			},
+		});
+
+		this.plugin.addCommand({
+			id: "create-note-from-hedgedoc-document",
+			name: "Create note from hedgedoc document",
+			callback: () => {
+				void this.createNoteFromHedgeDocDocument();
+			},
+		});
 	}
 
-	private registerQuickActions(): void {
-		this.pushQuickActionEl = this.plugin.addRibbonIcon(
-			"upload",
-			"Push active note to hedgedoc",
-			() => {
-				const file = this.getActiveMarkdownFile();
-				if (file !== null) {
+	private registerContextMenus(): void {
+		this.plugin.registerEvent(this.plugin.app.workspace.on("file-menu", (menu, file) => {
+			if (isMarkdownFile(file)) {
+				this.addContextMenuItems(menu, file);
+			}
+		}));
+
+		this.plugin.registerEvent(this.plugin.app.workspace.on("editor-menu", (menu, _editor: Editor, info) => {
+			if (isMarkdownFile(info.file)) {
+				this.addContextMenuItems(menu, info.file);
+			}
+		}));
+	}
+
+	private addContextMenuItems(menu: Menu, file: TFile): void {
+		const isLinked = this.hasLinkInFrontmatterCache(file);
+
+		if (isLinked) {
+			menu.addItem((item) => item
+				.setTitle("Push to hedgedoc")
+				.setIcon("upload")
+				.onClick(() => {
 					void this.pushFile(file, "manual");
-				}
-			},
-		);
-
-		this.pullQuickActionEl = this.plugin.addRibbonIcon(
-			"download",
-			"Pull active note from hedgedoc",
-			() => {
-				const file = this.getActiveMarkdownFile();
-				if (file !== null) {
+				}));
+			menu.addItem((item) => item
+				.setTitle("Pull from hedgedoc")
+				.setIcon("download")
+				.onClick(() => {
 					void this.pullFile(file, "manual");
-				}
-			},
-		);
-
-		this.liveQuickActionEl = this.plugin.addRibbonIcon(
-			"refresh-cw",
-			"Toggle live sync for active note",
-			() => {
-				const file = this.getActiveMarkdownFile();
-				if (file !== null) {
+				}));
+			menu.addItem((item) => item
+				.setTitle(this.liveSession?.filePath === file.path ? "Stop live sync" : "Start live sync")
+				.setIcon("refresh-cw")
+				.onClick(() => {
 					void this.toggleLiveSyncForFile(file);
-				}
-			},
-		);
+				}));
+			menu.addItem((item) => item
+				.setTitle("Open linked hedgedoc document")
+				.setIcon("external-link")
+				.onClick(() => {
+					void this.openLinkedDocument(file);
+				}));
+		} else {
+			menu.addItem((item) => item
+				.setTitle("Create hedgedoc document from this note")
+				.setIcon("plus-circle")
+				.onClick(() => {
+					void this.createHedgeDocDocumentFromFile(file);
+				}));
+		}
 	}
 
 	private async handleVaultModify(file: TAbstractFile): Promise<void> {
@@ -212,14 +258,16 @@ export class SyncManager {
 			return;
 		}
 
-		if (file.path === this.liveSyncFilePath) {
-			this.schedulePush(file, "live", this.plugin.settings.liveSyncPushDebounceMs);
+		if (this.liveSession?.filePath === file.path) {
+			this.scheduleLiveLocalSync();
 			return;
 		}
 
-		if (this.plugin.settings.autoPushOnSave) {
-			this.schedulePush(file, "auto", this.plugin.settings.autoPushDebounceMs);
+		if (!this.plugin.settings.autoPushOnSave) {
+			return;
 		}
+
+		this.schedulePush(file, "auto", this.plugin.settings.autoPushDebounceMs);
 	}
 
 	private handleFileRename(file: TAbstractFile, oldPath: string): void {
@@ -227,16 +275,16 @@ export class SyncManager {
 			return;
 		}
 
-		if (this.liveSyncFilePath === oldPath) {
-			this.liveSyncFilePath = file.path;
-			this.scheduleLiveSyncPull();
-			void this.updateQuickActions();
+		const liveSession = this.liveSession;
+		if (liveSession !== null && liveSession.filePath === oldPath) {
+			liveSession.filePath = file.path;
 		}
 	}
 
 	private handleFileDelete(file: TAbstractFile): void {
-		if (this.liveSyncFilePath === file.path) {
-			this.stopLiveSync("Live sync stopped because the file was deleted.");
+		const liveSession = this.liveSession;
+		if (liveSession !== null && liveSession.filePath === file.path) {
+			this.stopLiveSync("Live sync stopped because the note was deleted.");
 		}
 	}
 
@@ -259,6 +307,10 @@ export class SyncManager {
 		source: SyncSource,
 		options: Partial<PushOptions> = {},
 	): Promise<boolean> {
+		if (this.liveSession?.filePath === file.path) {
+			return this.pushWithLiveSession(file, source, options);
+		}
+
 		if (this.activePushes.has(file.path)) {
 			if (source === "manual") {
 				new Notice(`Sync already running for "${file.basename}".`);
@@ -281,6 +333,7 @@ export class SyncManager {
 						confirmText: "Overwrite remote",
 						cancelText: "Cancel",
 					});
+
 					if (!confirmed) {
 						new Notice(`Push cancelled for "${file.basename}".`);
 						return false;
@@ -289,12 +342,10 @@ export class SyncManager {
 			}
 
 			const result = await this.syncService.push(context.reference, context.parts.body);
-
 			if (resolvedOptions.showResultNotice) {
-				const message = result.changed
+				new Notice(result.changed
 					? `Synced "${file.basename}" to hedgedoc.`
-					: `"${file.basename}" is already in sync with hedgedoc.`;
-				new Notice(message);
+					: `"${file.basename}" is already in sync with hedgedoc.`);
 			}
 
 			return result.changed;
@@ -303,6 +354,53 @@ export class SyncManager {
 			return false;
 		} finally {
 			this.activePushes.delete(file.path);
+		}
+	}
+
+	private async pushWithLiveSession(
+		file: TFile,
+		source: SyncSource,
+		options: Partial<PushOptions>,
+	): Promise<boolean> {
+		const liveSession = this.liveSession;
+		if (liveSession === null || liveSession.filePath !== file.path) {
+			return false;
+		}
+
+		const resolvedOptions = resolvePushOptions(source, this.plugin.settings.warnBeforeOverwrite, options);
+
+		try {
+			const context = await this.buildSyncContext(file);
+			if (context.reference.url !== liveSession.reference.url) {
+				this.stopLiveSync(`Live sync stopped for "${file.basename}" because its linked hedgedoc note changed.`);
+				return false;
+			}
+
+			if (resolvedOptions.confirmOverwrite && liveSession.client.getDocument() !== context.parts.body) {
+				const confirmed = await requestConfirmation(this.plugin.app, {
+					title: "Overwrite remote content?",
+					message: `The remote hedgedoc note for "${file.basename}" has different content. Pushing now will overwrite the remote body with your local body.`,
+					confirmText: "Overwrite remote",
+					cancelText: "Cancel",
+				});
+
+				if (!confirmed) {
+					new Notice(`Push cancelled for "${file.basename}".`);
+					return false;
+				}
+			}
+
+			const operationCount = liveSession.client.updateContent(context.parts.body);
+			if (resolvedOptions.showResultNotice) {
+				new Notice(operationCount > 0
+					? `Synced "${file.basename}" to hedgedoc.`
+					: `"${file.basename}" is already in sync with hedgedoc.`);
+			}
+
+			return operationCount > 0;
+		} catch (error) {
+			this.handleSyncError(error, file, source);
+			return false;
 		}
 	}
 
@@ -316,9 +414,16 @@ export class SyncManager {
 
 		try {
 			const syncContext = context ?? await this.buildSyncContext(file);
-			const remoteContent = resolvedOptions.useDownloadEndpoint
-				? await this.syncService.download(syncContext.reference)
-				: await this.syncService.pull(syncContext.reference);
+			let remoteContent: string;
+
+			if (this.liveSession?.filePath === file.path && !resolvedOptions.useDownloadEndpoint) {
+				remoteContent = this.liveSession.client.getDocument();
+			} else {
+				remoteContent = resolvedOptions.useDownloadEndpoint
+					? await this.syncService.download(syncContext.reference)
+					: await this.syncService.pull(syncContext.reference);
+			}
+
 			const remoteBody = resolvedOptions.stripRemoteFrontmatter
 				? splitMarkdownContent(remoteContent).body
 				: remoteContent;
@@ -337,6 +442,7 @@ export class SyncManager {
 					confirmText: "Overwrite local",
 					cancelText: "Cancel",
 				});
+
 				if (!confirmed) {
 					new Notice(`Pull cancelled for "${file.basename}".`);
 					return "cancelled";
@@ -368,96 +474,188 @@ export class SyncManager {
 	}
 
 	private async toggleLiveSyncForFile(file: TFile): Promise<void> {
-		if (this.liveSyncFilePath === file.path) {
+		if (this.liveSession?.filePath === file.path) {
 			this.stopLiveSync(`Live sync disabled for "${file.basename}".`);
 			return;
 		}
 
 		try {
-			await this.buildSyncContext(file);
+			await this.startLiveSync(file);
+			new Notice(`Live sync enabled for "${file.basename}".`);
 		} catch (error) {
 			this.handleSyncError(error, file, "manual");
+		}
+	}
+
+	private async startLiveSync(file: TFile): Promise<void> {
+		this.stopLiveSync(null);
+
+		const context = await this.buildSyncContext(file);
+		const client = await this.syncService.connectLiveClient(context.reference);
+
+		const liveSession: LiveSyncSession = {
+			filePath: file.path,
+			reference: context.reference,
+			client,
+			localSyncTimerId: null,
+			writeQueue: Promise.resolve(),
+			onDocument: () => {
+				void this.applyLiveDocumentToFile();
+			},
+			onError: (error) => {
+				console.error("[hedgesync] live sync client error", error);
+			},
+			onDelete: () => {
+				this.stopLiveSync("Live sync stopped because the remote hedgedoc note was deleted.");
+			},
+		};
+
+		client.on("document", liveSession.onDocument);
+		client.on("error", liveSession.onError);
+		client.on("delete", liveSession.onDelete);
+
+		this.liveSession = liveSession;
+		await this.reconcileLiveSessionStart(file, context.parts.body);
+	}
+
+	private async reconcileLiveSessionStart(file: TFile, localBody: string): Promise<void> {
+		const liveSession = this.liveSession;
+		if (liveSession === null) {
 			return;
 		}
 
-		const previousFilePath = this.liveSyncFilePath;
-		this.liveSyncFilePath = file.path;
-		this.scheduleLiveSyncPull();
-		void this.updateQuickActions();
+		const remoteBody = liveSession.client.getDocument();
+		if (remoteBody === localBody) {
+			return;
+		}
 
-		if (previousFilePath !== null && previousFilePath !== file.path) {
-			const previousFile = this.plugin.app.vault.getAbstractFileByPath(previousFilePath);
-			if (isMarkdownFile(previousFile)) {
-				new Notice(`Live sync moved from "${previousFile.basename}" to "${file.basename}".`);
-			} else {
-				new Notice(`Live sync enabled for "${file.basename}".`);
+		if (this.plugin.settings.warnBeforeOverwrite) {
+			const useLocal = await requestConfirmation(this.plugin.app, {
+				title: "Resolve live sync content mismatch",
+				message: `Local and remote content differ for "${file.basename}". Use your local content as the live sync baseline?`,
+				confirmText: "Use local content",
+				cancelText: "Use remote content",
+			});
+
+			if (useLocal) {
+				liveSession.client.updateContent(localBody);
+				return;
 			}
-		} else {
-			new Notice(`Live sync enabled for "${file.basename}".`);
 		}
+
+		await this.applyLiveBodyToFile(remoteBody);
 	}
 
-	private scheduleLiveSyncPull(): void {
-		this.clearLiveSyncPullTimer();
-
-		if (this.liveSyncFilePath === null) {
+	private scheduleLiveLocalSync(): void {
+		const liveSession = this.liveSession;
+		if (liveSession === null) {
 			return;
 		}
 
-		this.liveSyncPullTimerId = window.setTimeout(() => {
-			void this.runLiveSyncPull();
-		}, this.plugin.settings.liveSyncPullIntervalMs);
-	}
-
-	private clearLiveSyncPullTimer(): void {
-		if (this.liveSyncPullTimerId !== null) {
-			window.clearTimeout(this.liveSyncPullTimerId);
-			this.liveSyncPullTimerId = null;
+		if (liveSession.localSyncTimerId !== null) {
+			window.clearTimeout(liveSession.localSyncTimerId);
 		}
+
+		liveSession.localSyncTimerId = window.setTimeout(() => {
+			liveSession.localSyncTimerId = null;
+			void this.syncLocalToLiveSession();
+		}, this.plugin.settings.liveSyncPushDebounceMs);
 	}
 
-	private async runLiveSyncPull(): Promise<void> {
-		const liveFilePath = this.liveSyncFilePath;
-		if (liveFilePath === null) {
+	private async syncLocalToLiveSession(): Promise<void> {
+		const liveSession = this.liveSession;
+		if (liveSession === null) {
 			return;
 		}
 
-		const liveFile = this.plugin.app.vault.getAbstractFileByPath(liveFilePath);
+		const liveFile = this.plugin.app.vault.getAbstractFileByPath(liveSession.filePath);
 		if (!isMarkdownFile(liveFile)) {
-			this.stopLiveSync("Live sync stopped because the file is no longer available.");
+			this.stopLiveSync("Live sync stopped because the note is no longer available.");
 			return;
 		}
 
-		await this.pullFile(liveFile, "live", {
-			showResultNotice: false,
-			showUpToDateNotice: false,
-			confirmOverwrite: false,
-		});
+		try {
+			const context = await this.buildSyncContext(liveFile);
+			if (context.reference.url !== liveSession.reference.url) {
+				this.stopLiveSync(`Live sync stopped for "${liveFile.basename}" because its linked hedgedoc note changed.`);
+				return;
+			}
 
-		if (this.liveSyncFilePath === liveFilePath) {
-			this.scheduleLiveSyncPull();
+			if (context.parts.body !== liveSession.client.getDocument()) {
+				liveSession.client.updateContent(context.parts.body);
+			}
+		} catch (error) {
+			this.handleSyncError(error, liveFile, "live");
 		}
 	}
 
-	private stopLiveSync(message: string | null = null): void {
-		this.clearLiveSyncPullTimer();
-
-		const liveFilePath = this.liveSyncFilePath;
-		this.liveSyncFilePath = null;
-
-		if (liveFilePath !== null) {
-			const pendingPushTimer = this.pushTimers.get(liveFilePath);
-			if (pendingPushTimer !== undefined) {
-				window.clearTimeout(pendingPushTimer);
-				this.pushTimers.delete(liveFilePath);
-			}
+	private async applyLiveDocumentToFile(): Promise<void> {
+		const liveSession = this.liveSession;
+		if (liveSession === null) {
+			return;
 		}
+
+		const remoteBody = liveSession.client.getDocument();
+		await this.enqueueLiveWrite(async () => {
+			await this.applyLiveBodyToFile(remoteBody);
+		});
+	}
+
+	private async applyLiveBodyToFile(remoteBody: string): Promise<void> {
+		const liveSession = this.liveSession;
+		if (liveSession === null) {
+			return;
+		}
+
+		const liveFile = this.plugin.app.vault.getAbstractFileByPath(liveSession.filePath);
+		if (!isMarkdownFile(liveFile)) {
+			this.stopLiveSync("Live sync stopped because the note is no longer available.");
+			return;
+		}
+
+		const markdown = await this.plugin.app.vault.cachedRead(liveFile);
+		const parts = splitMarkdownContent(markdown);
+		if (parts.body === remoteBody) {
+			return;
+		}
+
+		this.markAutoPushSuppressed(liveFile.path);
+		await this.plugin.app.vault.modify(liveFile, mergeMarkdownContent(parts, remoteBody));
+	}
+
+	private async enqueueLiveWrite(task: () => Promise<void>): Promise<void> {
+		const liveSession = this.liveSession;
+		if (liveSession === null) {
+			return;
+		}
+
+		liveSession.writeQueue = liveSession.writeQueue
+			.catch(() => undefined)
+			.then(task);
+
+		await liveSession.writeQueue;
+	}
+
+	private stopLiveSync(message: string | null): void {
+		const liveSession = this.liveSession;
+		if (liveSession === null) {
+			return;
+		}
+
+		this.liveSession = null;
+
+		if (liveSession.localSyncTimerId !== null) {
+			window.clearTimeout(liveSession.localSyncTimerId);
+		}
+
+		liveSession.client.off("document", liveSession.onDocument);
+		liveSession.client.off("error", liveSession.onError);
+		liveSession.client.off("delete", liveSession.onDelete);
+		liveSession.client.disconnect();
 
 		if (message !== null) {
 			new Notice(message);
 		}
-
-		void this.updateQuickActions();
 	}
 
 	private async pullAllLinkedNotesFromVault(): Promise<void> {
@@ -516,53 +714,132 @@ export class SyncManager {
 		);
 	}
 
-	private async updateQuickActions(): Promise<void> {
-		const pushEl = this.pushQuickActionEl;
-		const pullEl = this.pullQuickActionEl;
-		const liveEl = this.liveQuickActionEl;
-		if (pushEl === null || pullEl === null || liveEl === null) {
-			return;
-		}
-
-		if (!this.plugin.settings.showQuickActionButtons) {
-			setElementVisibility(pushEl, false);
-			setElementVisibility(pullEl, false);
-			setElementVisibility(liveEl, false);
-			return;
-		}
-
-		const refreshSeq = ++this.quickActionsRefreshSeq;
-		const activeFile = this.getActiveMarkdownFile();
-		if (activeFile === null) {
-			setElementVisibility(pushEl, false);
-			setElementVisibility(pullEl, false);
-			setElementVisibility(liveEl, false);
-			return;
-		}
-
-		const hasReference = await this.activeFileHasReference(activeFile);
-		if (refreshSeq !== this.quickActionsRefreshSeq) {
-			return;
-		}
-
-		setElementVisibility(pushEl, hasReference);
-		setElementVisibility(pullEl, hasReference);
-		setElementVisibility(liveEl, hasReference);
-
-		const liveEnabled = hasReference && this.liveSyncFilePath === activeFile.path;
-		liveEl.classList.toggle("hedgesync-live-active", liveEnabled);
-		liveEl.setAttribute("aria-label", liveEnabled
-			? "Stop live sync for active note"
-			: "Start live sync for active note");
-	}
-
-	private async activeFileHasReference(file: TFile): Promise<boolean> {
+	private async createHedgeDocDocumentFromFile(file: TFile): Promise<void> {
 		try {
 			await this.buildSyncContext(file);
-			return true;
-		} catch {
+			new Notice(`"${file.basename}" already has a linked hedgedoc document.`);
+			return;
+		} catch (error) {
+			if (!isMissingLinkError(error)) {
+				this.handleSyncError(error, file, "manual");
+				return;
+			}
+		}
+
+		const defaultServerUrl = this.plugin.settings.defaultServerUrl.trim();
+		if (defaultServerUrl.length === 0) {
+			new Notice("Set a default hedgedoc server URL before creating linked documents.");
+			return;
+		}
+
+			try {
+				const markdown = await this.plugin.app.vault.cachedRead(file);
+				const parts = splitMarkdownContent(markdown);
+				const reference = await this.syncService.createNote(defaultServerUrl, parts.body);
+
+				await this.plugin.app.fileManager.processFrontMatter(file, (frontmatter) => {
+					const frontmatterRecord = frontmatter as Record<string, unknown>;
+					frontmatterRecord[this.plugin.settings.frontmatterLinkProperty] = reference.url;
+				});
+
+			new Notice(`Created and linked hedgedoc document for "${file.basename}".`);
+		} catch (error) {
+			this.handleSyncError(error, file, "manual");
+		}
+	}
+
+	private async createNoteFromHedgeDocDocument(): Promise<void> {
+		const input = await requestHedgeDocImport(this.plugin.app, {
+			defaultFilePath: "HedgeDoc import.md",
+		});
+		if (input === null) {
+			return;
+		}
+
+		let reference: HedgeDocReference;
+		try {
+			reference = this.resolveReferenceInput(input.referenceInput);
+		} catch (error) {
+			new Notice(toErrorMessage(error));
+			return;
+		}
+
+		try {
+			const remoteBody = await this.syncService.download(reference);
+			const targetPath = this.resolveAvailableMarkdownPath(
+				input.targetPath.length > 0 ? input.targetPath : `${reference.noteId}.md`,
+			);
+			const frontmatterKey = this.plugin.settings.frontmatterLinkProperty;
+			const frontmatterValue = reference.url.replace(/"/g, '\\"');
+			const content = `---\n${frontmatterKey}: "${frontmatterValue}"\n---\n\n${remoteBody}`;
+
+			const file = await this.plugin.app.vault.create(targetPath, content);
+			await this.plugin.app.workspace.getLeaf(true).openFile(file);
+			new Notice(`Created "${file.basename}" from hedgedoc document.`);
+		} catch (error) {
+			new Notice(`Failed to create note from hedgedoc: ${toErrorMessage(error)}`);
+		}
+	}
+
+	private resolveReferenceInput(input: string): HedgeDocReference {
+		const trimmedInput = input.trim();
+		if (trimmedInput.length === 0) {
+			throw new Error("Enter a hedgedoc URL or note ID.");
+		}
+
+		if (/^https?:\/\//i.test(trimmedInput)) {
+			const parsed = parseNoteUrl(trimmedInput);
+			return {
+				serverUrl: parsed.serverUrl,
+				noteId: parsed.noteId,
+				url: buildNoteUrl(parsed.serverUrl, parsed.noteId),
+			};
+		}
+
+		const defaultServerUrl = this.plugin.settings.defaultServerUrl.trim();
+		if (defaultServerUrl.length === 0) {
+			throw new Error("Set a default hedgedoc server URL to import by note ID.");
+		}
+
+		const noteId = trimmedInput.replace(/^\/+/, "").replace(/\/+$/, "");
+		if (noteId.length === 0) {
+			throw new Error("Note ID is empty.");
+		}
+
+		return {
+			serverUrl: defaultServerUrl.replace(/\/$/, ""),
+			noteId,
+			url: buildNoteUrl(defaultServerUrl, noteId),
+		};
+	}
+
+	private resolveAvailableMarkdownPath(inputPath: string): string {
+		const trimmed = inputPath.trim();
+		const withExtension = trimmed.toLowerCase().endsWith(".md")
+			? trimmed
+			: `${trimmed}.md`;
+		const basePath = withExtension.length > 0 ? withExtension : "Untitled.md";
+
+		let candidate = basePath;
+		let suffix = 1;
+		while (this.plugin.app.vault.getAbstractFileByPath(candidate) !== null) {
+			candidate = basePath.replace(/\.md$/i, ` ${suffix}.md`);
+			suffix++;
+		}
+
+		return candidate;
+	}
+
+	private hasLinkInFrontmatterCache(file: TFile): boolean {
+		const cache = this.plugin.app.metadataCache.getFileCache(file);
+		const frontmatter = cache?.frontmatter;
+		if (frontmatter === undefined) {
 			return false;
 		}
+
+		const frontmatterRecord = frontmatter as Record<string, unknown>;
+		const value = frontmatterRecord[this.plugin.settings.frontmatterLinkProperty];
+		return value !== undefined && value !== null;
 	}
 
 	private async buildSyncContext(file: TFile): Promise<SyncContext> {
@@ -586,10 +863,7 @@ export class SyncManager {
 	}
 
 	private markAutoPushSuppressed(path: string): void {
-		this.suppressAutoPushUntil.set(
-			path,
-			Date.now() + this.plugin.settings.loopProtectionWindowMs,
-		);
+		this.suppressAutoPushUntil.set(path, Date.now() + this.plugin.settings.loopProtectionWindowMs);
 	}
 
 	private isAutoPushSuppressed(path: string): boolean {
@@ -679,10 +953,6 @@ function toErrorMessage(error: unknown): string {
 	}
 
 	return String(error);
-}
-
-function setElementVisibility(element: HTMLElement, visible: boolean): void {
-	element.style.display = visible ? "" : "none";
 }
 
 function logSyncError(

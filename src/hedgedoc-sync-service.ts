@@ -1,5 +1,13 @@
 import {requestUrl} from "obsidian";
-import {HedgeDocClient} from "hedgesync";
+import {
+	buildNoteUrl,
+	CreatedNoteRef,
+	HedgeDocAPI,
+	HedgeDocClient,
+	type HedgeSyncHttpRequest,
+	type HedgeSyncHttpResponse,
+	type HedgeSyncRequestFn,
+} from "hedgesync/obsidian";
 import type {HedgeSyncPluginSettings} from "./settings";
 import type {HedgeDocReference} from "./types";
 
@@ -11,75 +19,68 @@ export interface PushResult {
 
 export class HedgeDocSyncService {
 	private readonly getSettings: () => HedgeSyncPluginSettings;
+	private readonly requestFn: HedgeSyncRequestFn;
 
 	constructor(getSettings: () => HedgeSyncPluginSettings) {
 		this.getSettings = getSettings;
+		this.requestFn = (request) => this.requestWithObsidian(request);
 	}
 
 	async pull(reference: HedgeDocReference): Promise<string> {
-		return this.withClient(reference, async (client) => {
-			return client.getDocument();
-		});
+		return this.withClient(reference, false, async (client) => client.getDocument());
 	}
 
 	async push(reference: HedgeDocReference, content: string): Promise<PushResult> {
-		return this.withClient(reference, async (client) => {
+		return this.withClient(reference, false, async (client) => {
 			const currentContent = client.getDocument();
 			if (currentContent === content) {
 				return {changed: false};
 			}
 
-			client.setContent(content);
+			client.updateContent(content);
 			await this.waitUntilSynchronized(client, this.getSettings().requestTimeoutMs);
 			return {changed: true};
 		});
 	}
 
 	async download(reference: HedgeDocReference): Promise<string> {
-		const settings = this.getSettings();
-		const cookie = await this.resolveSessionCookie(reference, settings);
-		const response = await requestUrl({
-			url: `${reference.url}/download`,
-			method: "GET",
-			headers: {
-				Accept: "text/markdown, text/plain;q=0.9, */*;q=0.8",
-				Cookie: cookie,
-			},
-			throw: false,
-		});
+		const api = this.createApi(reference.serverUrl);
+		return api.downloadNote(reference.noteId);
+	}
 
-		if (response.status >= 400) {
-			throw new Error(`Failed to download ${reference.url}: HTTP ${response.status}`);
+	async createNote(serverUrl: string, content: string): Promise<HedgeDocReference> {
+		const api = this.createApi(serverUrl);
+		const created = await api.createNoteRef(content);
+		return toReference(created);
+	}
+
+	async connectLiveClient(reference: HedgeDocReference): Promise<HedgeDocClient> {
+		const client = this.createClient(reference, true);
+		try {
+			await withTimeout(
+				client.connect(),
+				this.getSettings().requestTimeoutMs,
+				`Timed out connecting to ${reference.url}`,
+			);
+			return client;
+		} catch (error) {
+			client.disconnect();
+			throw error;
 		}
-
-		return response.text;
 	}
 
 	private async withClient<T>(
 		reference: HedgeDocReference,
+		reconnect: boolean,
 		action: (client: HedgeDocClient) => Promise<T>,
 	): Promise<T> {
-		const settings = this.getSettings();
-		const cookie = await this.resolveSessionCookie(reference, settings);
-
-		const client = new HedgeDocClient({
-			serverUrl: reference.serverUrl,
-			noteId: reference.noteId,
-			cookie,
-			operationTimeout: settings.requestTimeoutMs,
-			reconnect: {
-				enabled: false,
-			},
-			rateLimit: {
-				enabled: false,
-			},
-		});
-		this.forceDesktopRuntime(client);
+		const client = this.createClient(reference, reconnect);
+		const timeoutMs = this.getSettings().requestTimeoutMs;
 
 		try {
 			await withTimeout(
 				client.connect(),
-				settings.requestTimeoutMs,
+				timeoutMs,
 				`Timed out connecting to ${reference.url}`,
 			);
 			return await action(client);
@@ -88,42 +89,52 @@ export class HedgeDocSyncService {
 		}
 	}
 
-	private async resolveSessionCookie(
-		reference: HedgeDocReference,
-		settings: HedgeSyncPluginSettings,
-	): Promise<string> {
-		const configuredCookie = settings.sessionCookie.trim();
-		if (configuredCookie.length > 0) {
-			return configuredCookie;
-		}
+	private createClient(reference: HedgeDocReference, reconnect: boolean): HedgeDocClient {
+		const settings = this.getSettings();
+		const cookie = settings.sessionCookie.trim();
 
-		const response = await requestUrl({
-			url: `${reference.serverUrl}/${reference.noteId}`,
-			method: "GET",
-			headers: {
-				Accept: "text/html",
+		return new HedgeDocClient({
+			serverUrl: reference.serverUrl,
+			noteId: reference.noteId,
+			cookie: cookie.length > 0 ? cookie : undefined,
+			runtime: "node",
+			request: this.requestFn,
+			operationTimeout: settings.requestTimeoutMs,
+			reconnect: {
+				enabled: reconnect,
 			},
+			rateLimit: {
+				enabled: true,
+			},
+		});
+	}
+
+	private createApi(serverUrl: string): HedgeDocAPI {
+		const settings = this.getSettings();
+		const cookie = settings.sessionCookie.trim();
+		return new HedgeDocAPI({
+			serverUrl,
+			cookie: cookie.length > 0 ? cookie : undefined,
+			request: this.requestFn,
+		});
+	}
+
+	private async requestWithObsidian(request: HedgeSyncHttpRequest): Promise<HedgeSyncHttpResponse> {
+		const response = await requestUrl({
+			url: request.url,
+			method: request.method,
+			headers: request.headers,
+			body: request.body,
 			throw: false,
 		});
 
-		if (response.status >= 400) {
-			throw new Error(`Failed to initialize session cookie from ${reference.url}: HTTP ${response.status}`);
-		}
-
-		const setCookieHeader = getHeaderCaseInsensitive(response.headers, "set-cookie");
-		const parsedCookies = parseSetCookieHeader(setCookieHeader);
-		if (parsedCookies.length === 0) {
-			throw new Error(
-				`Failed to initialize session cookie from ${reference.url}: no Set-Cookie header found.`,
-			);
-		}
-
-		const sessionCookie = parsedCookies.find((cookie) => cookie.startsWith("connect.sid="));
-		return sessionCookie ?? parsedCookies.join("; ");
-	}
-
-	private forceDesktopRuntime(client: HedgeDocClient): void {
-		(client as unknown as HedgeDocClientWithInternals)._isBrowserRuntime = () => false;
+		return {
+			status: response.status,
+			headers: response.headers,
+			text: async () => response.text,
+			json: async <T = unknown>() => JSON.parse(response.text) as T,
+			arrayBuffer: async () => response.arrayBuffer,
+		};
 	}
 
 	private async waitUntilSynchronized(client: HedgeDocClient, timeoutMs: number): Promise<void> {
@@ -137,8 +148,16 @@ export class HedgeDocSyncService {
 			await wait(WAIT_INTERVAL_MS);
 		}
 
-		throw new Error("Timed out while waiting for HedgeDoc to acknowledge changes.");
+		throw new Error("Timed out while waiting for hedgedoc to acknowledge changes.");
 	}
+}
+
+function toReference(created: CreatedNoteRef): HedgeDocReference {
+	return {
+		serverUrl: created.serverUrl,
+		noteId: created.noteId,
+		url: buildNoteUrl(created.serverUrl, created.noteId),
+	};
 }
 
 function wait(ms: number): Promise<void> {
@@ -163,38 +182,4 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
 			window.clearTimeout(timerId);
 		}
 	}
-}
-
-interface HedgeDocClientWithInternals {
-	_isBrowserRuntime?: () => boolean;
-}
-
-function getHeaderCaseInsensitive(headers: Record<string, string>, key: string): string | undefined {
-	const target = key.toLowerCase();
-	for (const [headerName, headerValue] of Object.entries(headers)) {
-		if (headerName.toLowerCase() === target) {
-			return headerValue;
-		}
-	}
-
-	return undefined;
-}
-
-function parseSetCookieHeader(headerValue: string | undefined): string[] {
-	if (headerValue === undefined || headerValue.trim().length === 0) {
-		return [];
-	}
-
-	const matches = headerValue.matchAll(/(?:^|,\s*)([^=;, \t]+)=([^;,]+)/g);
-	const cookies: string[] = [];
-
-	for (const match of matches) {
-		const cookieName = match[1];
-		const cookieValue = match[2];
-		if (cookieName !== undefined && cookieValue !== undefined) {
-			cookies.push(`${cookieName}=${cookieValue}`);
-		}
-	}
-
-	return cookies;
 }

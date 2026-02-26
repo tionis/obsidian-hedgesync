@@ -10,10 +10,12 @@ This plugin uses a frontmatter property to map each Obsidian note to one HedgeDo
 - Pull the active HedgeDoc document into Obsidian.
 - Open the linked HedgeDoc document from Obsidian.
 - Optional auto-push when a linked note is modified.
-- Live sync toggle for the active note (periodic pull + debounced push).
+- True live sync toggle for the active note (persistent HedgeDoc session with local/remote OT updates).
 - Optional confirmation prompt before manual pull/push overwrites differing content.
 - Vault-wide pull command for all linked notes using HedgeDoc `/download`, while preserving local frontmatter.
-- Quick action buttons (push, pull, live sync) in the ribbon, shown only for linked notes.
+- Create a hedgedoc document from an Obsidian note and link it in frontmatter.
+- Create an Obsidian note from a hedgedoc document URL or note ID.
+- Context menu actions in file/editor menus for linked notes.
 
 ## Requirements
 
@@ -68,6 +70,8 @@ hedgedoc:
 - `Open linked hedgedoc document`
 - `Toggle live sync for active note`
 - `Pull all linked notes from hedgedoc`
+- `Create hedgedoc document from active note`
+- `Create note from hedgedoc document`
 
 Use Obsidian hotkeys to assign keyboard shortcuts to these commands in **Settings → Hotkeys**.
 
@@ -80,9 +84,7 @@ Use Obsidian hotkeys to assign keyboard shortcuts to these commands in **Setting
 - `Auto push debounce (ms)`
 - `Request timeout (ms)`
 - `Warn before overwrite`
-- `Live sync pull interval (ms)`
 - `Live sync push debounce (ms)`
-- `Show quick action buttons`
 
 ## Development
 
