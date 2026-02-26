@@ -1,9 +1,9 @@
 {
 	"id": "hedgesync",
-	"name": "hedgesync",
-	"version": "0.1.2",
+	"name": "Hedgesync",
+	"version": "0.1.3",
 	"minAppVersion": "1.5.0",
-	"description": "Sync Obsidian notes with HedgeDoc documents using frontmatter links and hedgesync.",
+	"description": "Sync notes with HedgeDoc documents using frontmatter links and hedgesync.",
 	"author": "tionis.dev",
 	"isDesktopOnly": true
 }

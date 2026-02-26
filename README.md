@@ -24,6 +24,15 @@ This plugin uses a frontmatter property to map each Obsidian note to one HedgeDo
 - Node.js 18+ for development.
 - A reachable HedgeDoc 1.x server.
 
+## Policy disclosures
+
+- External service: this plugin syncs with user-configured HedgeDoc servers.
+- Data sent over the network: linked note body content, linked note IDs/URLs, and optional session cookie.
+- Network behavior: requests are only made for sync features (manual commands, live sync, or optional auto push).
+- Local storage: plugin settings are stored in `.obsidian/plugins/hedgesync/data.json`.
+- Telemetry: none.
+- Ads, affiliate links, paid unlocks, and remote code execution: none.
+
 ## Frontmatter mapping
 
 Default frontmatter key: `hedgedoc` (configurable in plugin settings).

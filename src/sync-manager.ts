@@ -1,4 +1,4 @@
-import {Editor, Menu, Notice, TAbstractFile, TFile} from "obsidian";
+import {Editor, Menu, normalizePath, Notice, TAbstractFile, TFile} from "obsidian";
 import {buildNoteUrl, HedgeDocClient, parseNoteUrl} from "hedgesync/obsidian";
 import {requestConfirmation} from "./confirmation-modal";
 import {HedgeDocReferenceError, mergeMarkdownContent, resolveHedgeDocReference, splitMarkdownContent} from "./frontmatter";
@@ -449,9 +449,14 @@ export class SyncManager {
 				}
 			}
 
-			const mergedContent = mergeMarkdownContent(syncContext.parts, remoteBody);
-			this.markAutoPushSuppressed(file.path);
-			await this.plugin.app.vault.modify(file, mergedContent);
+				this.markAutoPushSuppressed(file.path);
+				const changed = await this.replaceFileBodyPreservingFrontmatter(file, remoteBody);
+				if (!changed) {
+					if (resolvedOptions.showUpToDateNotice) {
+						new Notice(`"${file.basename}" is already up to date.`);
+					}
+					return "unchanged";
+				}
 
 			if (resolvedOptions.showResultNotice) {
 				new Notice(`Pulled changes from hedgedoc into "${file.basename}".`);
@@ -613,14 +618,8 @@ export class SyncManager {
 			return;
 		}
 
-		const markdown = await this.plugin.app.vault.cachedRead(liveFile);
-		const parts = splitMarkdownContent(markdown);
-		if (parts.body === remoteBody) {
-			return;
-		}
-
 		this.markAutoPushSuppressed(liveFile.path);
-		await this.plugin.app.vault.modify(liveFile, mergeMarkdownContent(parts, remoteBody));
+		await this.replaceFileBodyPreservingFrontmatter(liveFile, remoteBody);
 	}
 
 	private async enqueueLiveWrite(task: () => Promise<void>): Promise<void> {
@@ -815,15 +814,19 @@ export class SyncManager {
 
 	private resolveAvailableMarkdownPath(inputPath: string): string {
 		const trimmed = inputPath.trim();
-		const withExtension = trimmed.toLowerCase().endsWith(".md")
-			? trimmed
-			: `${trimmed}.md`;
-		const basePath = withExtension.length > 0 ? withExtension : "Untitled.md";
+		const baseName = trimmed.length > 0 ? trimmed : "Untitled";
+		const withExtension = baseName.toLowerCase().endsWith(".md")
+			? baseName
+			: `${baseName}.md`;
+		const basePath = normalizePath(withExtension);
+		if (basePath.length === 0 || basePath === "." || basePath.startsWith("../")) {
+			throw new Error("Target note path must be inside the vault.");
+		}
 
 		let candidate = basePath;
 		let suffix = 1;
 		while (this.plugin.app.vault.getAbstractFileByPath(candidate) !== null) {
-			candidate = basePath.replace(/\.md$/i, ` ${suffix}.md`);
+			candidate = normalizePath(basePath.replace(/\.md$/i, ` ${suffix}.md`));
 			suffix++;
 		}
 
@@ -851,6 +854,21 @@ export class SyncManager {
 		});
 
 		return {parts, reference};
+	}
+
+	private async replaceFileBodyPreservingFrontmatter(file: TFile, body: string): Promise<boolean> {
+		let changed = false;
+		await this.plugin.app.vault.process(file, (currentMarkdown) => {
+			const currentParts = splitMarkdownContent(currentMarkdown);
+			if (currentParts.body === body) {
+				return currentMarkdown;
+			}
+
+			changed = true;
+			return mergeMarkdownContent(currentParts, body);
+		});
+
+		return changed;
 	}
 
 	private getActiveMarkdownFile(): TFile | null {

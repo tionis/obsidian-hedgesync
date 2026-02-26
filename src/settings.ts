@@ -98,7 +98,7 @@ export class HedgeSyncSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Session cookie")
-			.setDesc("Optional hedgedoc session cookie (connect.sid=...) for private notes.")
+			.setDesc("Optional hedgedoc session cookie (connect.sid=...). Stored locally in plugin settings and sent only to the configured hedgedoc server.")
 			.addTextArea((text) => {
 				text
 					.setPlaceholder("Enter session cookie")
