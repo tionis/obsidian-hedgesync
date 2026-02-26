@@ -229,8 +229,8 @@ export class SyncManager {
 		}
 
 		const message = toErrorMessage(error);
+		logSyncError(error, file, source, message);
 		if (source === "auto") {
-			console.error(`[obsidian-hedgesync] Auto sync failed for ${file.path}:`, error);
 			new Notice(`Auto sync failed for "${file.basename}": ${message}`);
 			return;
 		}
@@ -249,4 +249,21 @@ function toErrorMessage(error: unknown): string {
 	}
 
 	return String(error);
+}
+
+function logSyncError(
+	error: unknown,
+	file: TFile,
+	source: SyncSource,
+	message: string,
+): void {
+	const scope = `[hedgesync] ${source} sync failed for "${file.path}"`;
+	console.error(`${scope}: ${message}`);
+
+	if (error instanceof Error && error.stack !== undefined) {
+		console.error(error.stack);
+		return;
+	}
+
+	console.error(error);
 }

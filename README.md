@@ -1,4 +1,4 @@
-# Obsidian HedgeSync
+# hedgesync
 
 Sync Obsidian Markdown notes with HedgeDoc documents using [`hedgesync`](https://github.com/tionis/hedgesync).
 
@@ -13,7 +13,8 @@ This plugin uses a frontmatter property to map each Obsidian note to one HedgeDo
 
 ## Requirements
 
-- Obsidian desktop or mobile.
+- Obsidian desktop.
+- Obsidian mobile is intentionally unsupported in this workaround.
 - Node.js 18+ for development.
 - A reachable HedgeDoc 1.x server.
 
@@ -94,7 +95,7 @@ npm run dev
 Manual test install path:
 
 ```text
-<Vault>/.obsidian/plugins/obsidian-hedgesync/
+<Vault>/.obsidian/plugins/hedgesync/
 ```
 
 Copy `main.js`, `manifest.json`, and `styles.css` into that folder.
