@@ -35,6 +35,26 @@ export class HedgeDocSyncService {
 		});
 	}
 
+	async download(reference: HedgeDocReference): Promise<string> {
+		const settings = this.getSettings();
+		const cookie = await this.resolveSessionCookie(reference, settings);
+		const response = await requestUrl({
+			url: `${reference.url}/download`,
+			method: "GET",
+			headers: {
+				Accept: "text/markdown, text/plain;q=0.9, */*;q=0.8",
+				Cookie: cookie,
+			},
+			throw: false,
+		});
+
+		if (response.status >= 400) {
+			throw new Error(`Failed to download ${reference.url}: HTTP ${response.status}`);
+		}
+
+		return response.text;
+	}
+
 	private async withClient<T>(
 		reference: HedgeDocReference,
 		action: (client: HedgeDocClient) => Promise<T>,

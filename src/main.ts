@@ -38,5 +38,6 @@ export default class ObsidianHedgeSyncPlugin extends Plugin {
 	async saveSettings(): Promise<void> {
 		this.settings = normalizeSettings(this.settings);
 		await this.saveData(this.settings);
+		this.syncManager?.onSettingsChanged();
 	}
 }

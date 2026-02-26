@@ -8,6 +8,10 @@ export interface HedgeSyncPluginSettings {
 	autoPushDebounceMs: number;
 	requestTimeoutMs: number;
 	loopProtectionWindowMs: number;
+	liveSyncPullIntervalMs: number;
+	liveSyncPushDebounceMs: number;
+	warnBeforeOverwrite: boolean;
+	showQuickActionButtons: boolean;
 }
 
 export const DEFAULT_SETTINGS: HedgeSyncPluginSettings = {
@@ -18,6 +22,10 @@ export const DEFAULT_SETTINGS: HedgeSyncPluginSettings = {
 	autoPushDebounceMs: 1500,
 	requestTimeoutMs: 15000,
 	loopProtectionWindowMs: 4000,
+	liveSyncPullIntervalMs: 5000,
+	liveSyncPushDebounceMs: 800,
+	warnBeforeOverwrite: true,
+	showQuickActionButtons: true,
 };
 
 export function normalizeSettings(settings: Partial<HedgeSyncPluginSettings>): HedgeSyncPluginSettings {
@@ -44,6 +52,20 @@ export function normalizeSettings(settings: Partial<HedgeSyncPluginSettings>): H
 			500,
 			30000,
 		),
+		liveSyncPullIntervalMs: coerceNumber(
+			settings.liveSyncPullIntervalMs,
+			DEFAULT_SETTINGS.liveSyncPullIntervalMs,
+			1000,
+			120000,
+		),
+		liveSyncPushDebounceMs: coerceNumber(
+			settings.liveSyncPushDebounceMs,
+			DEFAULT_SETTINGS.liveSyncPushDebounceMs,
+			200,
+			120000,
+		),
+		warnBeforeOverwrite: settings.warnBeforeOverwrite ?? DEFAULT_SETTINGS.warnBeforeOverwrite,
+		showQuickActionButtons: settings.showQuickActionButtons ?? DEFAULT_SETTINGS.showQuickActionButtons,
 	};
 }
 
@@ -161,6 +183,68 @@ export class HedgeSyncSettingTab extends PluginSettingTab {
 							1000,
 							120000,
 						);
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Warn before overwrite")
+			.setDesc("Ask for confirmation before manual pull or push overwrites different content.")
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.warnBeforeOverwrite)
+					.onChange(async (value) => {
+						this.plugin.settings.warnBeforeOverwrite = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Live sync pull interval (ms)")
+			.setDesc("How often live sync pulls updates from hedgedoc for the active note.")
+			.addText((text) => {
+				text
+					.setPlaceholder("5000")
+					.setValue(String(this.plugin.settings.liveSyncPullIntervalMs))
+					.onChange(async (value) => {
+						const parsedValue = Number.parseInt(value, 10);
+						this.plugin.settings.liveSyncPullIntervalMs = coerceNumber(
+							parsedValue,
+							this.plugin.settings.liveSyncPullIntervalMs,
+							1000,
+							120000,
+						);
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Live sync push debounce (ms)")
+			.setDesc("Delay before live sync pushes local changes after edits.")
+			.addText((text) => {
+				text
+					.setPlaceholder("800")
+					.setValue(String(this.plugin.settings.liveSyncPushDebounceMs))
+					.onChange(async (value) => {
+						const parsedValue = Number.parseInt(value, 10);
+						this.plugin.settings.liveSyncPushDebounceMs = coerceNumber(
+							parsedValue,
+							this.plugin.settings.liveSyncPushDebounceMs,
+							200,
+							120000,
+						);
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("Show quick action buttons")
+			.setDesc("Show push, pull, and live sync buttons in the left ribbon for linked notes.")
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.showQuickActionButtons)
+					.onChange(async (value) => {
+						this.plugin.settings.showQuickActionButtons = value;
 						await this.plugin.saveSettings();
 					});
 			});
