@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate tag and manifest version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          MANIFEST_VERSION=$(node --input-type=module -e "import fs from 'node:fs'; const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8')); process.stdout.write(manifest.version);")
+          if [ "${TAG_NAME}" != "${MANIFEST_VERSION}" ]; then
+            echo "::error::Tag (${TAG_NAME}) must match manifest.json version (${MANIFEST_VERSION})."
+            exit 1
+          fi
+
+          node --input-type=module -e "import fs from 'node:fs'; const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8')); const versions = JSON.parse(fs.readFileSync('versions.json', 'utf8')); if (!(manifest.version in versions)) { console.error('versions.json is missing key for version ' + manifest.version); process.exit(1); }"
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test --if-present
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: |
+            main.js
+            manifest.json
+            styles.css
