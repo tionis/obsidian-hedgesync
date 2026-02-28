@@ -58,7 +58,7 @@ export class SyncManager {
 		this.registerContextMenus();
 
 		this.plugin.registerEvent(this.plugin.app.vault.on("modify", (file) => {
-			void this.handleVaultModify(file);
+			this.handleVaultModify(file);
 		}));
 
 		this.plugin.registerEvent(this.plugin.app.vault.on("rename", (file, oldPath) => {
@@ -249,7 +249,7 @@ export class SyncManager {
 		}
 	}
 
-	private async handleVaultModify(file: TAbstractFile): Promise<void> {
+	private handleVaultModify(file: TAbstractFile): void {
 		if (!isMarkdownFile(file)) {
 			return;
 		}

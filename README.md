@@ -115,6 +115,12 @@ Watch mode:
 npm run dev
 ```
 
+Lint with the Obsidian plugin rules:
+
+```bash
+npm run lint
+```
+
 Manual test install path:
 
 ```text

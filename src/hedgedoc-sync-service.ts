@@ -27,7 +27,7 @@ export class HedgeDocSyncService {
 	}
 
 	async pull(reference: HedgeDocReference): Promise<string> {
-		return this.withClient(reference, false, async (client) => client.getDocument());
+		return this.withClient(reference, false, (client) => client.getDocument());
 	}
 
 	async push(reference: HedgeDocReference, content: string): Promise<PushResult> {
@@ -72,7 +72,7 @@ export class HedgeDocSyncService {
 	private async withClient<T>(
 		reference: HedgeDocReference,
 		reconnect: boolean,
-		action: (client: HedgeDocClient) => Promise<T>,
+		action: (client: HedgeDocClient) => T | Promise<T>,
 	): Promise<T> {
 		const client = this.createClient(reference, reconnect);
 		const timeoutMs = this.getSettings().requestTimeoutMs;
@@ -131,9 +131,9 @@ export class HedgeDocSyncService {
 		return {
 			status: response.status,
 			headers: response.headers,
-			text: async () => response.text,
-			json: async <T = unknown>() => JSON.parse(response.text) as T,
-			arrayBuffer: async () => response.arrayBuffer,
+			text: () => Promise.resolve(response.text),
+			json: <T = unknown>() => Promise.resolve(JSON.parse(response.text) as T),
+			arrayBuffer: () => Promise.resolve(response.arrayBuffer),
 		};
 	}
 
