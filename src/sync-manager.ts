@@ -748,8 +748,12 @@ export class SyncManager {
 	}
 
 	private async createNoteFromHedgeDocDocument(): Promise<void> {
+		const activeFile = this.plugin.app.workspace.getActiveFile();
+		const newFileParent = this.plugin.app.fileManager.getNewFileParent(activeFile?.path ?? "");
+		const folderPrefix = newFileParent.isRoot() ? "" : `${newFileParent.path}/`;
+
 		const input = await requestHedgeDocImport(this.plugin.app, {
-			defaultFilePath: "HedgeDoc import.md",
+			defaultFilePath: `${folderPrefix}HedgeDoc import.md`,
 		});
 		if (input === null) {
 			return;
@@ -766,7 +770,7 @@ export class SyncManager {
 		try {
 			const remoteBody = await this.syncService.download(reference);
 			const targetPath = this.resolveAvailableMarkdownPath(
-				input.targetPath.length > 0 ? input.targetPath : `${reference.noteId}.md`,
+				input.targetPath.length > 0 ? input.targetPath : `${folderPrefix}${reference.noteId}.md`,
 			);
 			const frontmatterKey = this.plugin.settings.frontmatterLinkProperty;
 			const frontmatterValue = reference.url.replace(/"/g, '\\"');
