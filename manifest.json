@@ -1,10 +1,10 @@
 {
-	"id": "hedgesync",
-	"name": "Hedgesync",
-	"version": "0.1.4",
-	"minAppVersion": "1.5.0",
-	"description": "Sync notes with HedgeDoc documents using frontmatter links and hedgesync.",
-	"author": "tionis.dev",
-	"authorUrl": "https://tionis.dev",
-	"isDesktopOnly": true
+  "id": "hedgesync",
+  "name": "Hedgesync",
+  "version": "0.1.5",
+  "minAppVersion": "1.5.0",
+  "description": "Sync notes with HedgeDoc documents using frontmatter links and hedgesync.",
+  "author": "tionis.dev",
+  "authorUrl": "https://tionis.dev",
+  "isDesktopOnly": true
 }
