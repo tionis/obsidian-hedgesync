@@ -128,9 +128,14 @@ export class HedgeDocSyncService {
 			throw: false,
 		});
 
+		const headers: Record<string, string> = {};
+		for (const [key, value] of Object.entries(response.headers as Record<string, string | string[]>)) {
+			headers[key] = Array.isArray(value) ? value.join('\n') : value;
+		}
+
 		return {
 			status: response.status,
-			headers: response.headers,
+			headers,
 			text: () => Promise.resolve(response.text),
 			json: <T = unknown>() => Promise.resolve(JSON.parse(response.text) as T),
 			arrayBuffer: () => Promise.resolve(response.arrayBuffer),
