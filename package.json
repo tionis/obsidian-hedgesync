@@ -1,6 +1,6 @@
 {
   "name": "obsidian-hedgesync",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Obsidian plugin to sync notes with HedgeDoc using frontmatter links and hedgesync",
   "main": "main.js",
   "type": "module",
