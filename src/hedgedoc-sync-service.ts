@@ -99,6 +99,7 @@ export class HedgeDocSyncService {
 			cookie: cookie.length > 0 ? cookie : undefined,
 			runtime: "node",
 			request: this.requestFn,
+			socketTransports: ["websocket"],
 			operationTimeout: settings.requestTimeoutMs,
 			reconnect: {
 				enabled: reconnect,

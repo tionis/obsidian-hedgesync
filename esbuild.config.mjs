@@ -1,6 +1,8 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from 'node:module';
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const banner =
 `/*
@@ -14,6 +16,64 @@ const externalBuiltins = [
 	...builtinModules,
 	...builtinModules.map((moduleName) => `node:${moduleName}`),
 ];
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const engineIoClientEsmDir = path.join(projectRoot, "node_modules/engine.io-client/build/esm");
+// The plugin only uses WebSocket live sync. Excluding Engine.IO polling keeps
+// browser-incompatible filesystem and shell shims out of the release bundle.
+const websocketOnlyEngineIoClientPlugin = {
+	name: "websocket-only-engine-io-client",
+	setup(build) {
+		build.onResolve({filter: /^engine\.io-client$/}, () => ({
+			path: "engine.io-client-websocket-only",
+			namespace: "websocket-only-engine-io-client",
+		}));
+
+		build.onLoad(
+			{filter: /^engine\.io-client-websocket-only$/, namespace: "websocket-only-engine-io-client"},
+			() => ({
+				resolveDir: engineIoClientEsmDir,
+				loader: "js",
+				contents: `
+					import { Socket, SocketWithoutUpgrade, SocketWithUpgrade } from "./socket.js";
+					import { WS as NodeWebSocket } from "./transports/websocket.node.js";
+
+					export { Socket, SocketWithoutUpgrade, SocketWithUpgrade };
+					export const protocol = Socket.protocol;
+					export { Transport, TransportError } from "./transport.js";
+					export { installTimerFunctions } from "./util.js";
+					export { parse } from "./contrib/parseuri.js";
+					export { nextTick } from "./globals.node.js";
+					export { NodeWebSocket };
+					export { WS as WebSocket } from "./transports/websocket.js";
+					class UnsupportedTransport {
+						constructor() {
+							throw new Error("This Obsidian build only includes the Engine.IO websocket transport.");
+						}
+					}
+					export const Fetch = UnsupportedTransport;
+					export const NodeXHR = UnsupportedTransport;
+					export const XHR = UnsupportedTransport;
+					export const WebTransport = UnsupportedTransport;
+					export const transports = {
+						websocket: NodeWebSocket,
+					};
+				`,
+			}),
+		);
+
+		build.onLoad({filter: /node_modules\/engine\.io-client\/build\/esm\/transports\/index\.js$/}, () => ({
+			resolveDir: path.join(engineIoClientEsmDir, "transports"),
+			loader: "js",
+			contents: `
+				import { WS } from "./websocket.node.js";
+
+				export const transports = {
+					websocket: WS,
+				};
+			`,
+		}));
+	},
+};
 
 const context = await esbuild.context({
 	banner: {
@@ -40,6 +100,7 @@ const context = await esbuild.context({
 	platform: "node",
 	target: "es2018",
 	logLevel: "info",
+	plugins: [websocketOnlyEngineIoClientPlugin],
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
 	outfile: "main.js",
