@@ -44,6 +44,7 @@ class HedgeDocImportModal extends Modal {
 			.setDesc("Use a full URL, or a note ID with default server configured.")
 			.addText((text) => {
 				text
+					// eslint-disable-next-line obsidianmd/ui/sentence-case -- URL examples should keep the conventional lowercase scheme.
 					.setPlaceholder("https://md.example.com/abc123")
 					.onChange((value) => {
 						this.referenceInput = value.trim();
