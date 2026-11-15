@@ -24,3 +24,12 @@
 .hedgesync-suggestion-note {
 	color: var(--text-muted);
 }
+
+.hedgesync-wide-input {
+	width: 100%;
+}
+
+.hedgesync-account-error:not(:empty) {
+	margin-top: var(--size-4-2);
+}
+

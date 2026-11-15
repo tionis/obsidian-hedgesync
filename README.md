@@ -45,7 +45,7 @@ Then reload Obsidian and enable **Hedgesync** in **Settings → Community plugin
 ## Getting started
 
 1. In **Settings → Hedgesync**, set the **Default hedgedoc server URL**.
-2. Select **Log in** to sign in through your server's login page. You can skip this for public notes. Instead of logging in, you can paste a session cookie (`connect.sid`) from a browser where you are logged in.
+2. Under **Accounts**, select **Add account** and log in through your server's login page. You can skip this for public notes. Instead of logging in, you can paste a session cookie (`connect.sid`) from a browser where you are logged in.
 3. Open a note and run **Create hedgedoc document from active note**, or add a link to an existing document in the frontmatter (see below).
 4. Run **Toggle live sync for active note**, or select the status bar item, to edit together in real time.
 
@@ -105,23 +105,28 @@ While live sync is on, the open editor and the HedgeDoc document stay identical:
 - **Read-only notes**: if you are not allowed to edit the note, remote changes still arrive, but local changes are not sent.
 - **Start automatically**: with this setting on, live sync starts when you open a linked note and stops when you close its last tab.
 
-## Login and privacy of credentials
+## Accounts
 
-- **Log in** opens your server's login page in a separate window with its own temporary browser session. After you sign in, the plugin keeps only the HedgeDoc session cookie; the window and its data are discarded.
-- Session cookies are stored per server in `.obsidian/plugins/hedgesync/data.json` and are only sent to the server they belong to.
-- **Log out** ends a session created by **Log in** on the server. For a pasted browser cookie it only forgets the cookie, since ending it would also log your browser out.
+You can have one account per HedgeDoc server, as many servers as you like. **Settings → Hedgesync → Accounts** lists them with the account name and when the session was last checked:
+
+- **Add account**: enter a server URL, then **Log in** on the server's login page (any method it offers: OIDC, GitHub, LDAP, email, ...) or paste a session cookie from your browser. A pasted cookie is checked with the server before it is saved.
+- **Check** (refresh icon): asks the server whether the session is still valid; expired sessions are marked.
+- **Log in again**, and **Log out** (login-window sessions are ended on the server) or **Forget** (a pasted browser cookie is only removed, so your browser stays logged in).
+- The command **Log in to hedgedoc** opens **Add account** for the active note's server.
+
+The login window uses its own temporary browser session; after you sign in, only the HedgeDoc session cookie is kept and the window's data is discarded. Session cookies are stored in `.obsidian/plugins/hedgesync/data.json` and are only ever sent to their own server. If you keep your vault in git, add that file to `.gitignore`.
 
 ## Troubleshooting
 
 - **"The TLS certificate ... is not trusted"**: the server uses a certificate from a private certificate authority. Install that CA in your operating system's certificate store; hedgesync uses the system store when Obsidian's Node.js version supports it (Node 22.15 or newer). On older versions, start Obsidian with `NODE_EXTRA_CA_CERTS=/path/to/ca.pem`.
 - **"... runs HedgeDoc 1.10.3 or older"**: upgrade the server to HedgeDoc 1.10.4 or newer.
-- **"The server did not accept the session"**: the session expired or the cookie is wrong. Log in again.
+- **"The server did not accept the session"**: the session expired or the cookie is wrong. Check the account in **Accounts** and log in again.
 - Error details are logged to the developer console (**View → Toggle developer tools**) with the prefix `[hedgesync]`.
 
 ## Settings
 
 - **Default hedgedoc server URL**: for new documents and links that store only a note ID.
-- **Login** / **Session cookie**: the account for the default server.
+- **Accounts**: logins per server (see above).
 - **Frontmatter link property**: frontmatter key of the link (default `hedgedoc`).
 - **Warn before overwrite**: ask before a manual push or pull replaces different content.
 - **Auto push on save** and **Auto push delay**.

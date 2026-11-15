@@ -1,5 +1,6 @@
 import {App, Notice, Plugin, PluginSettingTab, Setting} from "obsidian";
-import {serverKey} from "./server-key";
+import type {AccountManager} from "./accounts";
+import {displayServer, serverKey, serverUrlProblem} from "./server-key";
 
 export {serverKey};
 
@@ -12,6 +13,12 @@ export interface StoredSession {
 	/** "login": from the login window; "manual": pasted in settings. */
 	source: "login" | "manual";
 	savedAt: string;
+	/** Last time the server was asked about this session. */
+	checkedAt?: string;
+	/** Result of that check. */
+	status?: "ok" | "expired" | "unreachable";
+	/** Error detail for status "unreachable". */
+	error?: string;
 }
 
 export interface HedgeSyncPluginSettings {
@@ -70,16 +77,8 @@ export function normalizeSettings(raw: Partial<HedgeSyncPluginSettings> & Legacy
 	};
 }
 
-/** Why a server URL is unusable, or null if it is fine (or empty). */
-function serverUrlProblem(value: string): string | null {
-	if (value.length === 0) return null;
-	try {
-		const url = new URL(value);
-		if (url.protocol === "https:" || url.protocol === "http:") return null;
-	} catch {
-		// fall through
-	}
-	return "Not a valid URL: use the full address, for example https://md.example.com.";
+function defaultServerProblem(value: string): string | null {
+	return value.length === 0 ? null : serverUrlProblem(value);
 }
 
 function coerceNumber(value: unknown, fallback: number, min: number, max: number): number {
@@ -93,11 +92,7 @@ function coerceNumber(value: unknown, fallback: number, min: number, max: number
 export interface SettingsHost extends Plugin {
 	settings: HedgeSyncPluginSettings;
 	saveSettings(): Promise<void>;
-	logIn(serverUrl: string): Promise<void>;
-	/** Ask the server who the stored session belongs to; null if logged out. */
-	checkSession(serverUrl: string): Promise<{id: string; name: string} | null>;
-	logOut(serverUrl: string): Promise<void>;
-	loginWindowAvailable(): boolean;
+	accounts: AccountManager;
 }
 
 export class HedgeSyncSettingTab extends PluginSettingTab {
@@ -115,7 +110,7 @@ export class HedgeSyncSettingTab extends PluginSettingTab {
 
 		const serverSetting = new Setting(containerEl)
 			.setName("Default hedgedoc server URL")
-			.setDesc(serverUrlProblem(settings.defaultServerUrl)
+			.setDesc(defaultServerProblem(settings.defaultServerUrl)
 				?? "Used for new documents and for links that store only a note ID. Requires hedgedoc 1.10.4 or newer.")
 			.addText((text) => {
 				text
@@ -127,9 +122,9 @@ export class HedgeSyncSettingTab extends PluginSettingTab {
 					});
 				text.inputEl.addEventListener("blur", () => this.display());
 			});
-		if (serverUrlProblem(settings.defaultServerUrl) !== null) serverSetting.descEl.addClass("mod-warning");
+		if (defaultServerProblem(settings.defaultServerUrl) !== null) serverSetting.descEl.addClass("mod-warning");
 
-		this.displayAccount(containerEl);
+		this.displayAccounts(containerEl);
 
 		new Setting(containerEl).setName("Sync").setHeading();
 
@@ -185,87 +180,55 @@ export class HedgeSyncSettingTab extends PluginSettingTab {
 				}));
 	}
 
-	private displayAccount(containerEl: HTMLElement): void {
-		const settings = this.plugin.settings;
-		new Setting(containerEl).setName("Account").setHeading();
+	private displayAccounts(containerEl: HTMLElement): void {
+		const accounts = this.plugin.accounts;
+		new Setting(containerEl)
+			.setName("Accounts")
+			.setDesc("Public notes work without an account. Private notes and changing permissions need one. Each account is only used for its own server.")
+			.setHeading();
 
-		const serverUrl = settings.defaultServerUrl;
-		if (serverUrl.length === 0) {
-			containerEl.createEl("p", {text: "Set a default server URL to log in.", cls: "setting-item-description"});
-		} else {
-			const key = serverKey(serverUrl);
-			const session = settings.sessions[key];
-			const status = new Setting(containerEl)
-				.setName("Login")
-				.setDesc(session === undefined
-					? "Not logged in. Public notes work without a login; private notes and changing permissions need one."
-					: session.user !== undefined ? `Logged in as ${session.user.name}.` : "A session cookie is saved.");
+		for (const account of accounts.list()) {
+			const {key, session} = account;
+			const row = new Setting(containerEl).setName(displayServer(key) + (account.isDefault ? " (default)" : ""));
+			const status = describeSession(session);
+			row.setDesc(status.text);
+			if (status.warning) row.descEl.addClass("mod-warning");
 
-			if (this.plugin.loginWindowAvailable()) {
-				status.addButton((button) => button
-					.setButtonText(session === undefined ? "Log in" : "Log in again")
-					.setCta()
+			row.addExtraButton((button) => button
+				.setIcon("refresh-cw")
+				.setTooltip("Check whether the session is still valid")
+				.onClick(async () => {
+					button.setDisabled(true);
+					const checked = await accounts.check(key);
+					if (checked !== undefined) new Notice(`${displayServer(key)}: ${describeSession(checked).text}`);
+					this.display();
+				}));
+			if (accounts.canUseLoginWindow()) {
+				row.addExtraButton((button) => button
+					.setIcon("log-in")
+					.setTooltip("Log in again")
 					.onClick(async () => {
-						await this.plugin.logIn(serverUrl);
-						this.display();
+						if (await accounts.logIn(key)) this.display();
 					}));
 			}
-			if (session !== undefined) {
-				status.addButton((button) => button
-					.setButtonText("Check")
-					.onClick(async () => {
-						button.setDisabled(true);
-						try {
-							const user = await this.plugin.checkSession(serverUrl);
-							new Notice(user !== null ? `Logged in as ${user.name}.` : "The session has expired. Log in again.");
-						} catch (error) {
-							new Notice(`Could not check the session: ${error instanceof Error ? error.message : String(error)}`);
-						}
-						this.display();
-					}));
-				status.addButton((button) => button
-					.setButtonText("Log out")
-					.setWarning()
-					.onClick(async () => {
-						await this.plugin.logOut(serverUrl);
-						this.display();
-					}));
-			}
-
-			new Setting(containerEl)
-				.setName("Session cookie")
-				.setDesc("Alternative to logging in: paste the session cookie (connect.sid) from a browser where you are logged in. Stored in this vault's plugin data and sent only to this server.")
-				.addTextArea((text) => {
-					text
-						.setPlaceholder("Paste the session cookie")
-						.setValue(session?.cookie ?? "")
-						.onChange(async (value) => {
-							const cookie = value.trim();
-							if (cookie.length === 0) {
-								delete settings.sessions[key];
-							} else if (cookie !== settings.sessions[key]?.cookie) {
-								settings.sessions[key] = {cookie, source: "manual", savedAt: new Date().toISOString()};
-							}
-							await this.plugin.saveSettings();
-						});
-					text.inputEl.rows = 2;
-				});
+			row.addExtraButton((button) => button
+				.setIcon(session.source === "login" ? "log-out" : "trash-2")
+				.setTooltip(session.source === "login" ? "Log out (ends the session on the server)" : "Forget this cookie (your browser stays logged in)")
+				.onClick(async () => {
+					await accounts.remove(key);
+					new Notice(session.source === "login" ? `Logged out of ${displayServer(key)}.` : `Forgot the session for ${displayServer(key)}.`);
+					this.display();
+				}));
 		}
 
-		const others = Object.keys(settings.sessions).filter((key) => key !== serverKey(serverUrl));
-		for (const key of others) {
-			const session = settings.sessions[key];
-			new Setting(containerEl)
-				.setName(key)
-				.setDesc(session?.user !== undefined ? `Logged in as ${session.user.name}.` : "Session cookie saved.")
-				.addButton((button) => button
-					.setButtonText("Forget")
-					.onClick(async () => {
-						delete settings.sessions[key];
-						await this.plugin.saveSettings();
-						this.display();
-					}));
-		}
+		const defaultUrl = this.plugin.settings.defaultServerUrl;
+		const suggested = defaultUrl.length > 0 && accounts.get(defaultUrl) === undefined ? defaultUrl : "";
+		new Setting(containerEl)
+			.setName(accounts.list().length === 0 ? "No accounts yet" : "Add another account")
+			.addButton((button) => button
+				.setButtonText("Add account")
+				.setCta()
+				.onClick(() => accounts.openAddAccount(suggested, () => this.display())));
 	}
 
 	private numberSetting(
@@ -287,4 +250,30 @@ export class HedgeSyncSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 	}
+}
+
+function describeSession(session: StoredSession): {text: string; warning: boolean} {
+	const who = session.user !== undefined ? session.user.name : "unknown account";
+	const how = session.source === "login" ? "logged in" : "browser cookie";
+	const checked = session.checkedAt !== undefined ? `, checked ${timeAgo(session.checkedAt)}` : "";
+	switch (session.status) {
+		case "expired":
+			return {text: `Session expired (${who}). Log in again.`, warning: true};
+		case "unreachable":
+			return {text: `Could not reach the server${checked}: ${session.error ?? "unknown error"}`, warning: true};
+		default:
+			return {text: `${who} (${how}${checked})`, warning: false};
+	}
+}
+
+function timeAgo(iso: string): string {
+	const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+	if (!Number.isFinite(seconds) || seconds < 60) return "just now";
+	for (const [size, unit] of [[86400, "day"], [3600, "hour"], [60, "minute"]] as const) {
+		if (seconds >= size) {
+			const n = Math.floor(seconds / size);
+			return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+		}
+	}
+	return "just now";
 }

@@ -321,7 +321,7 @@ export class SyncManager {
 		try {
 			const {reference} = await this.context(file);
 			if (this.service.cookieFor(reference.serverUrl) === undefined) {
-				new Notice("Only the note's owner can change its permission. Log in first (command: Log in to hedgedoc).");
+				new Notice("Only the note's owner can change its permission. Add an account for this server first (command: Log in to hedgedoc).");
 				return;
 			}
 			const info = await this.service.noteInfo(reference);
@@ -417,11 +417,8 @@ export class SyncManager {
 				// Fall back to the default server.
 			}
 		}
-		if (serverUrl.length === 0) {
-			new Notice("Set a default hedgedoc server URL in the plugin settings first.");
-			return;
-		}
-		await this.plugin.logIn(serverUrl);
+		// Suggest the active note's server; the user can change it.
+		this.plugin.accounts.openAddAccount(serverUrl);
 	}
 
 	// ------------------------------------------------------------------
