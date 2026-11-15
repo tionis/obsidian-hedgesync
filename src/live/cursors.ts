@@ -34,18 +34,13 @@ class CaretWidget extends WidgetType {
 	toDOM(view: EditorView): HTMLElement {
 		// The editor's own document: popout windows have their own.
 		const doc = view.dom.ownerDocument;
-		const caret = doc.createElement("span");
-		caret.className = "hedgesync-cursor";
-		caret.setAttribute("aria-hidden", "true");
+		const caret = doc.createDocumentFragment().createSpan({cls: "hedgesync-cursor", attr: {"aria-hidden": "true"}});
 		// Only real colors from the server; anything else keeps the accent color.
 		const color = this.mark.color;
 		if (color !== null && doc.defaultView?.CSS.supports("color", color) === true) {
 			caret.style.setProperty("--hedgesync-cursor-color", color);
 		}
-		const label = doc.createElement("span");
-		label.className = "hedgesync-cursor-label";
-		label.textContent = this.mark.name;
-		caret.appendChild(label);
+		caret.createSpan({cls: "hedgesync-cursor-label", text: this.mark.name});
 		return caret;
 	}
 

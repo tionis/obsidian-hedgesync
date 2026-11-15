@@ -6,10 +6,9 @@ import {CookieStore} from "./cookie-store";
 import {
 	DEFAULT_SETTINGS,
 	type HedgeSyncPluginSettings,
-	HedgeSyncSettingTab,
 	normalizeSettings,
-	type SettingsHost,
 } from "./settings";
+import {HedgeSyncSettingTab, type SettingsHost} from "./ui/settings-tab";
 import {SyncManager} from "./sync-manager";
 import {LiveStatusBar} from "./ui/status-bar";
 

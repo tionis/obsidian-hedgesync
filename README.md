@@ -22,7 +22,7 @@ Hedgesync maps each Obsidian note to one HedgeDoc document through a configurabl
 
 ## Requirements
 
-- Obsidian desktop. Mobile is not supported.
+- Obsidian desktop **1.13 or newer**. Mobile is not supported. Hedgesync 0.3.0 is the last version for older Obsidian releases.
 - A HedgeDoc **1.10.4 or newer** server. HedgeDoc 1.10.3 and older use Socket.IO 2, which hedgesync cannot talk to; HedgeDoc 2 is not supported yet.
 
 ## Install
@@ -46,7 +46,7 @@ Then reload Obsidian and enable **Hedgesync** in **Settings → Community plugin
 ## Getting started
 
 1. In **Settings → Hedgesync**, set the **Default hedgedoc server URL**.
-2. Under **Accounts**, select **Add account** and log in through your server's login page. You can skip this for public notes. Instead of logging in, you can paste a session cookie (`connect.sid`) from a browser where you are logged in.
+2. Open **Accounts** and select **Add account** and log in through your server's login page. You can skip this for public notes. Instead of logging in, you can paste a session cookie (`connect.sid`) from a browser where you are logged in.
 3. Open a note and run **Create hedgedoc document from active note**, or add a link to an existing document in the frontmatter (see below).
 4. Run **Toggle live sync for active note**, or select the status bar item, to edit together in real time.
 
@@ -120,7 +120,7 @@ You can have one account per HedgeDoc server, as many servers as you like. **Set
 
 The login window uses its own temporary browser session; after you sign in, only the HedgeDoc session cookie is kept and the window's data is discarded.
 
-Session cookies are kept in Obsidian's secret storage (Obsidian 1.11.4 or newer), not in the plugin's `data.json`, and existing cookies are moved there automatically. On older Obsidian versions they stay in `.obsidian/plugins/hedgesync/data.json`; if you keep your vault in git, add that file to `.gitignore`. Cookies are only ever sent to their own server.
+Session cookies are kept in Obsidian's secret storage, not in the plugin's `data.json`, and cookies saved by older versions are moved there automatically. Cookies are only ever sent to their own server.
 
 ## Troubleshooting
 
@@ -144,7 +144,7 @@ Session cookies are kept in Obsidian's secret storage (Obsidian 1.11.4 or newer)
 - External service: the HedgeDoc servers you configure or link to.
 - Data sent: the text of linked notes (below the frontmatter), their note IDs or URLs, and the session cookie for that server.
 - Network requests happen only for sync features (commands, live sync, auto-push, login) and for checking saved accounts every few hours.
-- Local storage: settings in `.obsidian/plugins/hedgesync/data.json`; session cookies in Obsidian's secret storage (or in `data.json` before Obsidian 1.11.4).
+- Local storage: settings in `.obsidian/plugins/hedgesync/data.json`; session cookies in Obsidian's secret storage.
 - Telemetry, ads, paid features, remote code: none.
 
 ## Development

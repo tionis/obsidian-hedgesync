@@ -1,72 +1,24 @@
-import tseslint from 'typescript-eslint';
+import { defineConfig, globalIgnores } from "eslint/config";
 import obsidianmd from "eslint-plugin-obsidianmd";
-import globals from "globals";
-import { globalIgnores } from "eslint/config";
-import json from "@eslint/json";
 
-export default tseslint.config(
-	{
-		languageOptions: {
-			globals: {
-				...globals.browser,
-				...globals.node,
-			},
-			parserOptions: {
-				projectService: {
-					allowDefaultProject: [
-						'eslint.config.mts',
-						'manifest.json'
-					]
-				},
-				tsconfigRootDir: import.meta.dirname,
-				extraFileExtensions: ['.json']
-			},
-		},
-	},
+// The recommended config is what the community plugin scanner runs; it already
+// exempts tests and build scripts from the rules that only matter in Obsidian.
+export default defineConfig([
+	globalIgnores(["node_modules", "dist", "main.js", "esbuild.config.mjs", "version-bump.mjs", "scripts"]),
 	...obsidianmd.configs.recommended,
 	{
-		files: ["**/*.json"],
-		plugins: {
-			json,
-		},
-		language: "json/json",
-		rules: {
-			"no-irregular-whitespace": "off",
-			"obsidianmd/no-plugin-as-component": "off",
-			"obsidianmd/no-view-references-in-plugin": "off",
-			"obsidianmd/no-unsupported-api": "off",
-			"obsidianmd/prefer-file-manager-trash-file": "off",
-			"obsidianmd/prefer-instanceof": "off",
+		languageOptions: {
+			parserOptions: {
+				projectService: {
+					allowDefaultProject: ["eslint.config.*"],
+				},
+				tsconfigRootDir: import.meta.dirname,
+			},
 		},
 	},
 	{
-		files: ["**/*.js", "**/*.mjs", "**/*.cjs"],
-		rules: {
-			"obsidianmd/no-plugin-as-component": "off",
-			"obsidianmd/no-view-references-in-plugin": "off",
-			"obsidianmd/no-unsupported-api": "off",
-			"obsidianmd/prefer-file-manager-trash-file": "off",
-			"obsidianmd/prefer-instanceof": "off",
-		},
-	},
-	{
-		// Unit tests run in Node, not in Obsidian windows.
+		// node:test's test() returns a promise the runner tracks.
 		files: ["test/**/*.ts"],
-		rules: {
-			"obsidianmd/no-global-this": "off",
-			"obsidianmd/prefer-active-doc": "off",
-			"obsidianmd/prefer-window-timers": "off",
-			"@typescript-eslint/no-floating-promises": "off",
-		},
+		rules: {"@typescript-eslint/no-floating-promises": "off"},
 	},
-	globalIgnores([
-		"node_modules",
-		"dist",
-		"esbuild.config.mjs",
-		"package-lock.json",
-		"tsconfig.json",
-		"version-bump.mjs",
-		"versions.json",
-		"main.js",
-	]),
-);
+]);

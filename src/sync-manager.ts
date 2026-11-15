@@ -426,8 +426,8 @@ export class SyncManager {
 	// ------------------------------------------------------------------
 
 	isLinked(file: TFile): boolean {
-		const frontmatter = this.plugin.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-		const value = frontmatter?.[this.plugin.settings.frontmatterLinkProperty];
+		const frontmatter = this.plugin.app.metadataCache.getFileCache(file)?.frontmatter;
+		const value: unknown = frontmatter?.[this.plugin.settings.frontmatterLinkProperty];
 		return value !== undefined && value !== null && value !== "";
 	}
 

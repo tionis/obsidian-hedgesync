@@ -89,6 +89,6 @@ export class AccountModal extends Modal {
 
 	private showError(message: string): void {
 		const el = this.contentEl.querySelector(".hedgesync-account-error");
-		if (el instanceof HTMLElement) el.setText(message);
+		if (el?.instanceOf(HTMLElement)) el.setText(message);
 	}
 }
