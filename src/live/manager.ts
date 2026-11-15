@@ -8,6 +8,9 @@ import {EditorView, type ViewUpdate} from "@codemirror/view";
 import {editorInfoField, MarkdownView, type TAbstractFile, TFile, type WorkspaceLeaf} from "obsidian";
 import type {HedgeDocService} from "../hedgedoc-service";
 import type {HedgeDocReference} from "../types";
+import {indexFromCursor} from "hedgesync/obsidian";
+import {splitMarkdownContent} from "../markdown";
+import {type CursorMark, remoteCursorExtension, setRemoteCursors} from "./cursors";
 import type {EditorChange} from "./operations";
 import {type BaselineChoice, type EditorPort, type LiveHost, LiveSession, type LiveStatus} from "./session";
 import type ObsidianHedgeSyncPlugin from "../main";
@@ -63,7 +66,10 @@ export class LiveSyncManager {
 
 	register(): void {
 		const {app} = this.plugin;
-		this.plugin.registerEditorExtension(EditorView.updateListener.of((update) => this.onEditorUpdate(update)));
+		this.plugin.registerEditorExtension([
+			remoteCursorExtension,
+			EditorView.updateListener.of((update) => this.onEditorUpdate(update)),
+		]);
 		this.plugin.registerEvent(app.vault.on("modify", (file) => this.onModify(file)));
 		this.plugin.registerEvent(app.vault.on("rename", (file, oldPath) => this.onRename(file, oldPath)));
 		this.plugin.registerEvent(app.vault.on("delete", (file) => {
@@ -104,6 +110,7 @@ export class LiveSyncManager {
 		const session = new LiveSession(file.path, reference, client, this.host);
 		this.sessions.set(file.path, session);
 		session.onStatus(() => this.emitStatus());
+		session.onCursors(() => this.showCursors(session));
 		this.emitStatus();
 		try {
 			await session.start(chooseBaseline);
@@ -120,6 +127,7 @@ export class LiveSyncManager {
 		if (session === undefined) return;
 		this.sessions.delete(path);
 		session.stop();
+		this.showCursors(session);
 		this.emitStatus();
 		if (message !== null) this.plugin.notify(message);
 	}
@@ -130,29 +138,61 @@ export class LiveSyncManager {
 	}
 
 	private editorsFor(path: string): EditorPort[] {
-		const ports: EditorPort[] = [];
+		return this.viewsFor(path).map(portFor);
+	}
+
+	private viewsFor(path: string): EditorView[] {
+		const views: EditorView[] = [];
 		this.plugin.app.workspace.iterateAllLeaves((leaf: WorkspaceLeaf) => {
 			const view = leaf.view;
 			if (view instanceof MarkdownView && view.file?.path === path) {
 				const cm = editorView(view);
-				if (cm !== null) ports.push(portFor(cm));
+				if (cm !== null) views.push(cm);
 			}
 		});
-		return ports;
+		return views;
+	}
+
+	/** Draw a session's remote cursors in every editor of its note (none once stopped). */
+	private showCursors(session: LiveSession): void {
+		const cursors = session.remoteCursors();
+		for (const cm of this.viewsFor(session.path)) {
+			const text = cm.state.doc.toString();
+			const parts = splitMarkdownContent(text);
+			const offset = parts.frontmatterBlock?.length ?? 0;
+			const marks: CursorMark[] = cursors.map((remote) => ({
+				id: remote.id,
+				name: remote.name,
+				color: remote.color,
+				pos: offset + indexFromCursor(parts.body, remote.cursor),
+			}));
+			cm.dispatch({effects: setRemoteCursors.of(marks)});
+		}
 	}
 
 	private onEditorUpdate(update: ViewUpdate): void {
-		if (!update.docChanged || this.sessions.size === 0) return;
-		if (update.transactions.some((tr) => tr.annotation(remoteEdit) === true)) return;
+		if (this.sessions.size === 0) return;
 		const file = update.state.field(editorInfoField, false)?.file;
 		if (file === null || file === undefined) return;
 		const session = this.sessions.get(file.path);
 		if (session === undefined) return;
-		const changes: EditorChange[] = [];
-		update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-			changes.push({from: fromA, to: toA, insert: inserted.toString()});
-		});
-		session.onEditorChange(update.startState.doc.toString(), update.state.doc.toString(), changes);
+		if (update.docChanged && !update.transactions.some((tr) => tr.annotation(remoteEdit) === true)) {
+			const changes: EditorChange[] = [];
+			update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+				changes.push({from: fromA, to: toA, insert: inserted.toString()});
+			});
+			session.onEditorChange(update.startState.doc.toString(), update.state.doc.toString(), changes);
+		}
+		// Share where the cursor is while this editor has focus (after the edit, so
+		// the position refers to the text others now have).
+		if (update.focusChanged || update.selectionSet || (update.docChanged && update.view.hasFocus)) {
+			if (update.view.hasFocus) {
+				session.setLocalCursor(update.state.doc.toString(), update.state.selection.main.head);
+			} else if (!this.viewsFor(file.path).some((cm) => cm.hasFocus)) {
+				// Focus may have moved to another pane of the same note.
+				session.setLocalCursor(update.state.doc.toString(), null);
+			}
+		}
 	}
 
 	private onModify(file: TAbstractFile): void {
@@ -186,6 +226,7 @@ export class LiveSyncManager {
 			const session = this.sessions.get(path);
 			if (session !== undefined) {
 				for (const editor of this.editorsFor(path)) session.syncEditor(editor);
+				this.showCursors(session);
 			} else if (this.plugin.settings.liveSyncAutoStart) {
 				const file = this.plugin.app.vault.getAbstractFileByPath(path);
 				if (file instanceof TFile) void this.plugin.autoStartLiveSync(file);

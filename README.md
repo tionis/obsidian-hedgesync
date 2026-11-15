@@ -10,6 +10,7 @@ Hedgesync maps each Obsidian note to one HedgeDoc document through a configurabl
 
 - Live sync: edit a note in Obsidian while others edit it in HedgeDoc. Changes go both ways as they happen, without moving your cursor or polluting your undo history. Several notes can be live at once.
 - Live sync survives connection loss: edits made while offline are merged with remote edits when the connection returns.
+- See where others' cursors are, with their names, and they see yours (in HedgeDoc or in Obsidian).
 - A status bar item shows the live sync state of the active note and who else is in it.
 - Log in from Obsidian with any login method your HedgeDoc server offers (OIDC, GitHub, LDAP, email, ...).
 - Push the active note to HedgeDoc, or pull the HedgeDoc document into it.
@@ -102,6 +103,7 @@ While live sync is on, the open editor and the HedgeDoc document stay identical:
 
 - **Starting**: if the note and the HedgeDoc document differ, you choose which version to keep (with **Warn before overwrite** off, the HedgeDoc version wins).
 - **Connection loss**: the status bar shows **Offline**. Keep editing; when the connection returns, your edits and the remote edits are merged.
+- **Cursors**: other people's cursors appear as colored carets; their name shows briefly when they move and when you hover the line. Your cursor is shown to them while your editor has focus, except inside the front matter, which only you see. HedgeDoc shares cursors but not selections.
 - **Read-only notes**: if you are not allowed to edit the note, remote changes still arrive, but local changes are not sent.
 - **Start automatically**: with this setting on, live sync starts when you open a linked note and stops when you close its last tab.
 

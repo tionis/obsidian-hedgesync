@@ -33,3 +33,49 @@
 	margin-top: var(--size-4-2);
 }
 
+
+/* Other people's cursors in live sync */
+.hedgesync-cursor {
+	position: relative;
+	display: inline-block;
+	width: 0;
+	height: 1.2em;
+	vertical-align: text-bottom;
+	border-left: 2px solid var(--hedgesync-cursor-color, var(--color-accent));
+	margin-left: -1px;
+	margin-right: -1px;
+	pointer-events: none;
+}
+
+.hedgesync-cursor-label {
+	position: absolute;
+	bottom: 100%;
+	left: -2px;
+	padding: 0 var(--size-2-1);
+	border-radius: var(--radius-s);
+	background-color: var(--hedgesync-cursor-color, var(--color-accent));
+	color: #fff;
+	font-size: var(--font-ui-smaller);
+	line-height: 1.4;
+	white-space: nowrap;
+	pointer-events: none;
+	z-index: 1;
+	opacity: 0;
+	animation: hedgesync-cursor-label 3s ease-out;
+}
+
+/* The name shows for a moment after the cursor moves, and on hovering the line. */
+.cm-line:hover .hedgesync-cursor-label {
+	opacity: 1;
+	animation: none;
+}
+
+@keyframes hedgesync-cursor-label {
+	0%,
+	70% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+	}
+}

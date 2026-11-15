@@ -16,8 +16,8 @@
  * Free of Obsidian imports; the plugin supplies a LiveHost.
  */
 
-import type {HedgeDocClient, TextOperation, UserInfo} from "hedgesync/obsidian";
-import {diffToOperation} from "hedgesync/obsidian";
+import type {CursorPosition, HedgeDocClient, TextOperation, UserInfo} from "hedgesync/obsidian";
+import {cursorFromIndex, diffToOperation} from "hedgesync/obsidian";
 import {mergeMarkdownContent, splitMarkdownContent} from "../markdown";
 import type {HedgeDocReference} from "../types";
 import {changesFromOperation, type EditorChange, mergeDivergent, operationFromChanges} from "./operations";
@@ -46,10 +46,20 @@ export interface LiveStatus {
 	others: UserInfo[];
 }
 
+/** Another user's cursor, as a line/column in the note body. */
+export interface RemoteCursor {
+	id: string;
+	name: string;
+	color: string | null;
+	cursor: CursorPosition;
+}
+
 /** How to resolve different local and remote content when starting. */
 export type BaselineChoice = (local: string, remote: string) => Promise<"local" | "remote">;
 
 const DISK_WRITE_DELAY_MS = 300;
+/** Cursor moves are sent at most this often (HedgeDoc's editor debounces too). */
+const CURSOR_SEND_DELAY_MS = 100;
 
 export class LiveSession {
 	state: LiveState = "connecting";
@@ -60,6 +70,11 @@ export class LiveSession {
 	private fileChangedOffline = false;
 	private readOnlyNoticeShown = false;
 	private readonly listeners = new Set<(status: LiveStatus) => void>();
+	private readonly cursorListeners = new Set<() => void>();
+	/** The local cursor last sent (null: none shown), and one waiting to be sent. */
+	private sentCursor: CursorPosition | null = null;
+	private pendingCursor: CursorPosition | null = null;
+	private cursorTimer: number | null = null;
 	private readonly cleanup: (() => void)[] = [];
 
 	constructor(
@@ -81,7 +96,14 @@ export class LiveSession {
 		this.listen("document", () => queueMicrotask(() => this.onDocumentReplaced()));
 		this.listen("disconnect", () => this.onDisconnect());
 		this.listen("ready", () => this.onReconnected());
-		this.listen("users", () => this.emitStatus());
+		this.listen("users", () => {
+			this.emitStatus();
+			this.emitCursors();
+		});
+		this.listen("user:left", () => this.emitCursors());
+		for (const event of ["cursor:focus", "cursor:activity", "cursor:blur"]) {
+			this.listen(event, () => this.emitCursors());
+		}
 		this.listen("permission", () => this.refreshEditState());
 		this.listen("refresh", () => this.refreshEditState());
 		this.listen("reconnect:failed", () => {
@@ -100,6 +122,8 @@ export class LiveSession {
 		this.agreed = this.client.getDocument();
 		this.pushToLocal(this.agreed);
 		this.refreshEditState();
+		this.emitCursors();
+		if (this.pendingCursor !== null) this.sendCursor(this.pendingCursor);
 	}
 
 	/** A method, not a field check, so TypeScript does not narrow across awaits. */
@@ -111,11 +135,14 @@ export class LiveSession {
 		if (this.state === "stopped") return;
 		this.state = "stopped";
 		if (this.diskTimer !== null) window.clearTimeout(this.diskTimer);
+		if (this.cursorTimer !== null) window.clearTimeout(this.cursorTimer);
 		for (const off of this.cleanup) off();
 		this.cleanup.length = 0;
 		this.client.disconnect();
 		this.emitStatus();
+		this.emitCursors();
 		this.listeners.clear();
+		this.cursorListeners.clear();
 	}
 
 	onStatus(listener: (status: LiveStatus) => void): () => void {
@@ -127,6 +154,63 @@ export class LiveSession {
 		const selfId = this.client.socket?.id;
 		const others = this.state === "stopped" ? [] : this.client.getOnlineUsers().filter((user) => user.id !== selfId);
 		return {state: this.state, others};
+	}
+
+	// ------------------------------------------------------------------
+	// Cursors
+	// ------------------------------------------------------------------
+
+	/** Called when others' cursors may have changed. */
+	onCursors(listener: () => void): () => void {
+		this.cursorListeners.add(listener);
+		return () => this.cursorListeners.delete(listener);
+	}
+
+	/**
+	 * Others' cursors in the shared document (the note body). Empty unless
+	 * connected, since positions only fit the document both sides share.
+	 */
+	remoteCursors(): RemoteCursor[] {
+		if (this.state !== "live" && this.state !== "read-only") return [];
+		const selfId = this.client.socket?.id;
+		const cursors: RemoteCursor[] = [];
+		for (const user of this.client.getOnlineUsers()) {
+			if (user.id === selfId || user.cursor === null || user.cursor === undefined) continue;
+			cursors.push({id: user.id, name: user.name ?? "Guest", color: user.color ?? null, cursor: user.cursor});
+		}
+		return cursors;
+	}
+
+	/**
+	 * The local cursor moved: `head` is an offset in the editor's `text`, or
+	 * null when the editor lost focus. A cursor in the front matter is not
+	 * shown to others, since they cannot see the front matter.
+	 */
+	setLocalCursor(text: string, head: number | null): void {
+		let cursor: CursorPosition | null = null;
+		if (head !== null) {
+			const parts = splitMarkdownContent(text);
+			const offset = parts.frontmatterBlock?.length ?? 0;
+			if (head >= offset) cursor = cursorFromIndex(parts.body, head - offset);
+		}
+		this.pendingCursor = cursor;
+		if (this.cursorTimer !== null) return;
+		this.cursorTimer = window.setTimeout(() => {
+			this.cursorTimer = null;
+			this.sendCursor(this.pendingCursor);
+		}, CURSOR_SEND_DELAY_MS);
+	}
+
+	private sendCursor(cursor: CursorPosition | null, force = false): void {
+		if (this.state !== "live" && this.state !== "read-only") return;
+		const sent = this.sentCursor;
+		if (!force && (cursor === sent || (cursor !== null && sent !== null && cursor.line === sent.line && cursor.ch === sent.ch))) return;
+		this.client.setCursor(cursor);
+		this.sentCursor = cursor;
+	}
+
+	private emitCursors(): void {
+		for (const listener of this.cursorListeners) listener();
 	}
 
 	private listen(event: string, handler: (...args: never[]) => void): void {
@@ -290,6 +374,7 @@ export class LiveSession {
 	private onDisconnect(): void {
 		if (this.state === "connecting") return;
 		this.setState("offline");
+		this.emitCursors();
 	}
 
 	private onReconnected(): void {
@@ -332,6 +417,11 @@ export class LiveSession {
 		this.state = this.client.canEdit() ? "live" : "read-only";
 		this.pushToLocal(this.agreed);
 		this.emitStatus();
+		this.emitCursors();
+		// The server forgot our cursor with the old connection.
+		const cursor = this.pendingCursor;
+		this.sentCursor = null;
+		if (cursor !== null) this.sendCursor(cursor, true);
 	}
 
 	/** Read the note as the user sees it: an open editor, else the file. */

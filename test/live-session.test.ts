@@ -16,7 +16,7 @@ class FakeClient {
 	ready = false;
 	editable = true;
 	socket = {id: "me"};
-	users = [{id: "me", name: "Me"}, {id: "other", name: "Ada"}];
+	users: Array<{id: string; name: string; color?: string; cursor?: {line: number; ch: number} | null}> = [{id: "me", name: "Me"}, {id: "other", name: "Ada"}];
 	sent: string[] = [];
 	private handlers = new Map<string, Set<(...args: unknown[]) => void>>();
 
@@ -66,6 +66,15 @@ class FakeClient {
 		this.document = text;
 		this.emit("document", this.document);
 		return 1;
+	}
+	setCursor(cursor: {line: number; ch: number} | null) {
+		this.sent.push(cursor === null ? "cursor:blur" : `cursor:${cursor.line}:${cursor.ch}`);
+	}
+	/** Another user moves their cursor (null: blur). */
+	remoteCursor(id: string, cursor: {line: number; ch: number} | null) {
+		const user = this.users.find((u) => u.id === id)!;
+		user.cursor = cursor;
+		this.emit(cursor === null ? "cursor:blur" : "cursor:activity", cursor === null ? {id} : user);
 	}
 	/** Another user edits. */
 	remote(text: string) {
@@ -213,4 +222,57 @@ test("status lists the other users, not this connection", async () => {
 	assert.deepEqual(session.status().others.map((u) => u.name), ["Ada"]);
 	session.stop();
 	assert.equal(session.status().state, "stopped");
+});
+
+test("local cursor is sent debounced, relative to the body, without repeats", async () => {
+	const {client, session} = setup({local: "ab\ncd", remote: "ab\ncd"});
+	await session.start(() => Promise.resolve("remote"));
+	const text = FM + "ab\ncd";
+	session.setLocalCursor(text, FM.length + 1);
+	session.setLocalCursor(text, FM.length + 4);
+	assert.deepEqual(client.sent, []);
+	await tick(150);
+	assert.deepEqual(client.sent, ["cursor:1:1"]);
+	session.setLocalCursor(text, FM.length + 4);
+	await tick(150);
+	assert.deepEqual(client.sent, ["cursor:1:1"]);
+	session.setLocalCursor(text, 3); // in the front matter: hidden from others
+	await tick(150);
+	session.setLocalCursor(text, null);
+	await tick(150);
+	assert.deepEqual(client.sent, ["cursor:1:1", "cursor:blur"]);
+	session.stop();
+});
+
+test("cursor is sent again after a reconnect, and not while offline", async () => {
+	const {client, session} = setup({local: "abc", remote: "abc"});
+	await session.start(() => Promise.resolve("remote"));
+	session.setLocalCursor(FM + "abc", FM.length + 2);
+	await tick(150);
+	client.drop();
+	session.setLocalCursor(FM + "abc", FM.length + 3);
+	await tick(150);
+	assert.deepEqual(client.sent, ["cursor:0:2"]);
+	client.reconnect("abc");
+	assert.deepEqual(client.sent, ["cursor:0:2", "cursor:0:3"]);
+	session.stop();
+});
+
+test("remote cursors exclude this connection and blurred users, and vanish offline", async () => {
+	const {client, session} = setup({local: "x", remote: "x"});
+	let changes = 0;
+	session.onCursors(() => changes++);
+	await session.start(() => Promise.resolve("remote"));
+	client.users[0]!.cursor = {line: 0, ch: 0}; // our own, as echoed in the users list
+	client.users[1]!.color = "#f00";
+	client.remoteCursor("other", {line: 0, ch: 1});
+	assert.deepEqual(session.remoteCursors(), [{id: "other", name: "Ada", color: "#f00", cursor: {line: 0, ch: 1}}]);
+	client.drop();
+	assert.deepEqual(session.remoteCursors(), []);
+	client.reconnect("x");
+	assert.equal(session.remoteCursors().length, 1);
+	client.remoteCursor("other", null);
+	assert.deepEqual(session.remoteCursors(), []);
+	assert.ok(changes >= 4);
+	session.stop();
 });
