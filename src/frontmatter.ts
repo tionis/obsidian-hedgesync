@@ -1,7 +1,7 @@
 import {parseYaml} from "obsidian";
-import type {MarkdownParts, HedgeDocReference} from "./types";
+import {splitMarkdownContent} from "./markdown";
+import type {HedgeDocReference} from "./types";
 
-const FRONTMATTER_BLOCK_PATTERN = /^(---\r?\n[\s\S]*?\r?\n---\r?\n?)/;
 
 type HedgeDocReferenceErrorCode =
 	| "missing-frontmatter"
@@ -21,36 +21,6 @@ export class HedgeDocReferenceError extends Error {
 export interface ResolveReferenceOptions {
 	linkProperty: string;
 	defaultServerUrl: string;
-}
-
-export function splitMarkdownContent(markdown: string): MarkdownParts {
-	const match = FRONTMATTER_BLOCK_PATTERN.exec(markdown);
-	const frontmatterBlock = match?.[1];
-
-	if (frontmatterBlock === undefined) {
-		return {
-			frontmatterBlock: null,
-			body: markdown,
-		};
-	}
-
-	return {
-		frontmatterBlock,
-		body: markdown.slice(frontmatterBlock.length),
-	};
-}
-
-export function mergeMarkdownContent(parts: MarkdownParts, body: string): string {
-	if (parts.frontmatterBlock === null) {
-		return body;
-	}
-
-	if (body.length === 0) {
-		return parts.frontmatterBlock;
-	}
-
-	const separator = parts.frontmatterBlock.endsWith("\n") ? "" : "\n";
-	return `${parts.frontmatterBlock}${separator}${body}`;
 }
 
 export function resolveHedgeDocReference(
@@ -85,8 +55,8 @@ function parseFrontmatter(frontmatterBlock: string | null): Record<string, unkno
 	}
 
 	const frontmatterYaml = frontmatterBlock
-		.replace(/^---\r?\n/, "")
-		.replace(/\r?\n---\r?\n?$/, "");
+		.replace(/^---[ \t]*\r?\n/, "")
+		.replace(/(?:^|\r?\n)---[ \t]*(?:\r?\n)?$/, "");
 
 	let parsedYaml: unknown;
 	try {
@@ -97,6 +67,10 @@ function parseFrontmatter(frontmatterBlock: string | null): Record<string, unkno
 			"invalid-link-value",
 			`Could not parse YAML frontmatter: ${message}`,
 		);
+	}
+
+	if (parsedYaml === null || parsedYaml === undefined) {
+		return {};
 	}
 
 	if (!isObject(parsedYaml)) {

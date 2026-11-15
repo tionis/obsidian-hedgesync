@@ -49,6 +49,16 @@ export default tseslint.config(
 			"obsidianmd/prefer-instanceof": "off",
 		},
 	},
+	{
+		// Unit tests run in Node, not in Obsidian windows.
+		files: ["test/**/*.ts"],
+		rules: {
+			"obsidianmd/no-global-this": "off",
+			"obsidianmd/prefer-active-doc": "off",
+			"obsidianmd/prefer-window-timers": "off",
+			"@typescript-eslint/no-floating-promises": "off",
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",

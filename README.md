@@ -4,20 +4,25 @@ Sync Obsidian notes with HedgeDoc documents using frontmatter links and [`hedges
 
 [Install from the Obsidian plugin store](https://community.obsidian.md/plugins/hedgesync)
 
-Hedgesync maps each Obsidian note to one HedgeDoc document through a configurable frontmatter property. It supports manual sync commands, optional auto-push on save, and a live sync mode for the active note.
+Hedgesync maps each Obsidian note to one HedgeDoc document through a configurable frontmatter property. You can push and pull by hand, push automatically on save, or edit together in real time with live sync.
 
 ## Highlights
 
-- Push the active Obsidian note to HedgeDoc.
-- Pull the linked HedgeDoc document back into Obsidian.
-- Open linked HedgeDoc documents from Obsidian.
-- Create a HedgeDoc document from the active note and write the link to frontmatter.
-- Create an Obsidian note from a HedgeDoc document URL or note ID.
-- Pull all linked notes across the vault while preserving local frontmatter.
-- Enable optional auto-push when linked notes are modified.
-- Toggle live sync for the active note with local and remote OT updates.
-- Confirm before manual pull or push overwrites differing content.
-- Use file and editor context menu actions for linked notes.
+- Live sync: edit a note in Obsidian while others edit it in HedgeDoc. Changes go both ways as they happen, without moving your cursor or polluting your undo history. Several notes can be live at once.
+- Live sync survives connection loss: edits made while offline are merged with remote edits when the connection returns.
+- A status bar item shows the live sync state of the active note and who else is in it.
+- Log in from Obsidian with any login method your HedgeDoc server offers (OIDC, GitHub, LDAP, email, ...).
+- Push the active note to HedgeDoc, or pull the HedgeDoc document into it.
+- Create a HedgeDoc document from a note, or a note from a HedgeDoc document.
+- Copy or open the published page (`/s/...`) and slide link of a note.
+- Change who can view and edit a note (for notes you own).
+- Pull all linked notes across the vault, keeping local frontmatter.
+- Optional auto-push when linked notes change.
+
+## Requirements
+
+- Obsidian desktop. Mobile is not supported.
+- A HedgeDoc **1.10.4 or newer** server. HedgeDoc 1.10.3 and older use Socket.IO 2, which hedgesync cannot talk to; HedgeDoc 2 is not supported yet.
 
 ## Install
 
@@ -29,35 +34,24 @@ https://community.obsidian.md/plugins/hedgesync
 
 ### Manual install
 
-Download the release assets and place them in:
+Download `main.js`, `manifest.json` and `styles.css` from a release and place them in:
 
 ```text
 <Vault>/.obsidian/plugins/hedgesync/
 ```
 
-Required files:
+Then reload Obsidian and enable **Hedgesync** in **Settings → Community plugins**.
 
-- `main.js`
-- `manifest.json`
-- `styles.css`
+## Getting started
 
-Then reload Obsidian and enable **Hedgesync** in **Settings -> Community plugins**.
-
-## Requirements
-
-- Obsidian desktop.
-- A reachable HedgeDoc 1.x server.
-- Node.js 18+ for development.
-
-Obsidian mobile is intentionally unsupported because this plugin depends on desktop-compatible sync behavior.
+1. In **Settings → Hedgesync**, set the **Default hedgedoc server URL**.
+2. Select **Log in** to sign in through your server's login page. You can skip this for public notes. Instead of logging in, you can paste a session cookie (`connect.sid`) from a browser where you are logged in.
+3. Open a note and run **Create hedgedoc document from active note**, or add a link to an existing document in the frontmatter (see below).
+4. Run **Toggle live sync for active note**, or select the status bar item, to edit together in real time.
 
 ## Frontmatter
 
-Default frontmatter key: `hedgedoc`
-
-You can change the key in plugin settings.
-
-### Full URL
+Default frontmatter key: `hedgedoc` (configurable).
 
 ```yaml
 ---
@@ -65,7 +59,7 @@ hedgedoc: https://md.example.com/my-note-id
 ---
 ```
 
-### Note ID with a default server URL
+A bare note ID uses the default server:
 
 ```yaml
 ---
@@ -73,7 +67,7 @@ hedgedoc: my-note-id
 ---
 ```
 
-### Object form
+Object form:
 
 ```yaml
 ---
@@ -83,77 +77,73 @@ hedgedoc:
 ---
 ```
 
-You can also use `url` in object form:
-
-```yaml
----
-hedgedoc:
-  url: https://md.example.com/my-note-id
----
-```
+Only the text below the frontmatter is synchronized; the frontmatter stays in Obsidian. HedgeDoc's own settings (title, tags, `type: slide`, ...) live in a YAML block at the top of the HedgeDoc document, which appears in Obsidian as ordinary text below your frontmatter.
 
 ## Commands
 
-- `Sync active note to hedgedoc`
-- `Sync active note from hedgedoc`
-- `Open linked hedgedoc document`
+- `Sync active note to hedgedoc` (push)
+- `Sync active note from hedgedoc` (pull)
 - `Toggle live sync for active note`
-- `Pull all linked notes from hedgedoc`
+- `Open linked hedgedoc document`
+- `Copy published link of active note`
+- `Copy slide link of active note`
+- `Open published page of active note`
+- `Change who can view and edit the linked hedgedoc note`
 - `Create hedgedoc document from active note`
 - `Create note from hedgedoc document`
+- `Pull all linked notes from hedgedoc`
+- `Log in to hedgedoc`
 
-Use Obsidian hotkeys to assign keyboard shortcuts in **Settings -> Hotkeys**.
+Assign keyboard shortcuts in **Settings → Hotkeys**.
+
+## Live sync
+
+While live sync is on, the open editor and the HedgeDoc document stay identical: your edits are sent as you type, and remote edits are applied to the editor directly. If the note is not open in an editor, remote edits are written to the file.
+
+- **Starting**: if the note and the HedgeDoc document differ, you choose which version to keep (with **Warn before overwrite** off, the HedgeDoc version wins).
+- **Connection loss**: the status bar shows **Offline**. Keep editing; when the connection returns, your edits and the remote edits are merged.
+- **Read-only notes**: if you are not allowed to edit the note, remote changes still arrive, but local changes are not sent.
+- **Start automatically**: with this setting on, live sync starts when you open a linked note and stops when you close its last tab.
+
+## Login and privacy of credentials
+
+- **Log in** opens your server's login page in a separate window with its own temporary browser session. After you sign in, the plugin keeps only the HedgeDoc session cookie; the window and its data are discarded.
+- Session cookies are stored per server in `.obsidian/plugins/hedgesync/data.json` and are only sent to the server they belong to.
+- **Log out** ends a session created by **Log in** on the server. For a pasted browser cookie it only forgets the cookie, since ending it would also log your browser out.
+
+## Troubleshooting
+
+- **"The TLS certificate ... is not trusted"**: the server uses a certificate from a private certificate authority. Install that CA in your operating system's certificate store; hedgesync uses the system store when Obsidian's Node.js version supports it (Node 22.15 or newer). On older versions, start Obsidian with `NODE_EXTRA_CA_CERTS=/path/to/ca.pem`.
+- **"... runs HedgeDoc 1.10.3 or older"**: upgrade the server to HedgeDoc 1.10.4 or newer.
+- **"The server did not accept the session"**: the session expired or the cookie is wrong. Log in again.
+- Error details are logged to the developer console (**View → Toggle developer tools**) with the prefix `[hedgesync]`.
 
 ## Settings
 
-- `Default hedgedoc server URL`
-- `Session cookie`
-- `Frontmatter link property`
-- `Auto push on save`
-- `Auto push debounce (ms)`
-- `Request timeout (ms)`
-- `Warn before overwrite`
-- `Live sync push debounce (ms)`
-
-The session cookie is optional and only needed for private HedgeDoc notes.
+- **Default hedgedoc server URL**: for new documents and links that store only a note ID.
+- **Login** / **Session cookie**: the account for the default server.
+- **Frontmatter link property**: frontmatter key of the link (default `hedgedoc`).
+- **Warn before overwrite**: ask before a manual push or pull replaces different content.
+- **Auto push on save** and **Auto push delay**.
+- **Request timeout**.
+- **Live sync → Start automatically**.
 
 ## Privacy
 
-- External service: user-configured HedgeDoc servers.
-- Data sent over the network: linked note body content, linked note IDs or URLs, and optional session cookie.
-- Network behavior: requests are only made for sync features, including manual commands, live sync, and optional auto-push.
-- Local storage: settings are stored in `.obsidian/plugins/hedgesync/data.json`.
-- Telemetry: none.
-- Ads, affiliate links, paid unlocks, and remote code execution: none.
+- External service: the HedgeDoc servers you configure or link to.
+- Data sent: the text of linked notes (below the frontmatter), their note IDs or URLs, and the session cookie for that server.
+- Network requests happen only for sync features: commands, live sync, auto-push and login.
+- Local storage: settings and session cookies in `.obsidian/plugins/hedgesync/data.json`.
+- Telemetry, ads, paid features, remote code: none.
 
 ## Development
 
-Install dependencies:
-
 ```bash
 npm install
+npm run dev     # watch build
+npm run build   # production build
+npm run lint    # Obsidian plugin rules
+npm test        # unit tests
 ```
 
-Build once:
-
-```bash
-npm run build
-```
-
-Watch mode:
-
-```bash
-npm run dev
-```
-
-Lint with Obsidian plugin rules:
-
-```bash
-npm run lint
-```
-
-Manual test install path:
-
-```text
-<Vault>/.obsidian/plugins/hedgesync/
-```
+Manual test install path: `<Vault>/.obsidian/plugins/hedgesync/`.

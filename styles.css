@@ -1,1 +1,26 @@
-/* No custom styles currently. */
+.hedgesync-status {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
+.hedgesync-status-icon {
+	display: inline-flex;
+}
+
+.hedgesync-status-icon svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+}
+
+.hedgesync-status.is-live .hedgesync-status-icon {
+	color: var(--color-green);
+}
+
+.hedgesync-status.is-offline .hedgesync-status-icon {
+	color: var(--color-orange);
+}
+
+.hedgesync-suggestion-note {
+	color: var(--text-muted);
+}
