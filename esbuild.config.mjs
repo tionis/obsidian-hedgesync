@@ -34,10 +34,12 @@ const websocketOnlyEngineIoClientPlugin = {
 				resolveDir: engineIoClientEsmDir,
 				loader: "js",
 				contents: `
-					import { Socket, SocketWithoutUpgrade, SocketWithUpgrade } from "./socket.js";
+					import { Socket } from "./socket.js";
 					import { WS as NodeWebSocket } from "./transports/websocket.node.js";
 
-					export { Socket, SocketWithoutUpgrade, SocketWithUpgrade };
+					// engine.io-client 6.6.7 dropped SocketWithoutUpgrade/SocketWithUpgrade;
+					// re-export whatever socket.js provides so the shim tracks upstream.
+					export * from "./socket.js";
 					export const protocol = Socket.protocol;
 					export { Transport, TransportError } from "./transport.js";
 					export { installTimerFunctions } from "./util.js";
