@@ -114,7 +114,11 @@ You can have one account per HedgeDoc server, as many servers as you like. **Set
 - **Log in again**, and **Log out** (login-window sessions are ended on the server) or **Forget** (a pasted browser cookie is only removed, so your browser stays logged in).
 - The command **Log in to hedgedoc** opens **Add account** for the active note's server.
 
-The login window uses its own temporary browser session; after you sign in, only the HedgeDoc session cookie is kept and the window's data is discarded. Session cookies are stored in `.obsidian/plugins/hedgesync/data.json` and are only ever sent to their own server. If you keep your vault in git, add that file to `.gitignore`.
+- **Background checks**: shortly after Obsidian starts and every 6 hours, each account's session is checked. This also keeps it alive: HedgeDoc extends a session whenever it is used (by default to 14 days). When a session has expired you get a notice, and errors caused by missing access say whether to add an account or log in again. An expired login cannot be renewed without you, since the server's login page needs you to sign in.
+
+The login window uses its own temporary browser session; after you sign in, only the HedgeDoc session cookie is kept and the window's data is discarded.
+
+Session cookies are kept in Obsidian's secret storage (Obsidian 1.11.4 or newer), not in the plugin's `data.json`, and existing cookies are moved there automatically. On older Obsidian versions they stay in `.obsidian/plugins/hedgesync/data.json`; if you keep your vault in git, add that file to `.gitignore`. Cookies are only ever sent to their own server.
 
 ## Troubleshooting
 
@@ -137,8 +141,8 @@ The login window uses its own temporary browser session; after you sign in, only
 
 - External service: the HedgeDoc servers you configure or link to.
 - Data sent: the text of linked notes (below the frontmatter), their note IDs or URLs, and the session cookie for that server.
-- Network requests happen only for sync features: commands, live sync, auto-push and login.
-- Local storage: settings and session cookies in `.obsidian/plugins/hedgesync/data.json`.
+- Network requests happen only for sync features (commands, live sync, auto-push, login) and for checking saved accounts every few hours.
+- Local storage: settings in `.obsidian/plugins/hedgesync/data.json`; session cookies in Obsidian's secret storage (or in `data.json` before Obsidian 1.11.4).
 - Telemetry, ads, paid features, remote code: none.
 
 ## Development

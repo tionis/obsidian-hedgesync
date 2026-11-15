@@ -12,7 +12,6 @@ import {
 	type HedgeSyncRequestFn,
 } from "hedgesync/obsidian";
 import {createNodeRequest, trustedCertificates} from "./net/http";
-import {serverKey} from "./server-key";
 import type {HedgeSyncPluginSettings} from "./settings";
 import type {HedgeDocReference} from "./types";
 
@@ -24,13 +23,12 @@ export type OverwriteCheck = (remote: string) => Promise<boolean>;
 export class HedgeDocService {
 	private readonly request: HedgeSyncRequestFn;
 
-	constructor(private readonly getSettings: () => HedgeSyncPluginSettings) {
+	constructor(
+		private readonly getSettings: () => HedgeSyncPluginSettings,
+		/** The saved session cookie for a server, if any. Never another server's. */
+		readonly cookieFor: (serverUrl: string) => string | undefined,
+	) {
 		this.request = createNodeRequest(() => this.getSettings().requestTimeoutMs);
-	}
-
-	/** The saved session cookie for a server, if any. Never another server's. */
-	cookieFor(serverUrl: string): string | undefined {
-		return this.getSettings().sessions[serverKey(serverUrl)]?.cookie;
 	}
 
 	api(serverUrl: string, cookie = this.cookieFor(serverUrl)): HedgeDocAPI {

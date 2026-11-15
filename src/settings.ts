@@ -6,8 +6,13 @@ export {serverKey};
 
 /** A HedgeDoc login, stored per server. */
 export interface StoredSession {
-	/** Cookie header value, e.g. "connect.sid=s%3A...". */
-	cookie: string;
+	/**
+	 * Cookie header value, e.g. "connect.sid=s%3A...". Only kept here when
+	 * Obsidian's secret storage is unavailable; otherwise see secretId.
+	 */
+	cookie?: string;
+	/** ID of the cookie in Obsidian's secret storage. */
+	secretId?: string;
 	/** Account the cookie belonged to when last checked. */
 	user?: {id: string; name: string};
 	/** "login": from the login window; "manual": pasted in settings. */
@@ -54,8 +59,13 @@ export function normalizeSettings(raw: Partial<HedgeSyncPluginSettings> & Legacy
 	const defaultServerUrl = (raw.defaultServerUrl ?? "").trim();
 	const sessions: Record<string, StoredSession> = {};
 	for (const [key, session] of Object.entries(raw.sessions ?? {})) {
-		if (typeof session?.cookie === "string" && session.cookie.trim().length > 0) {
-			sessions[key] = {...session, cookie: session.cookie.trim()};
+		const cookie = typeof session?.cookie === "string" ? session.cookie.trim() : "";
+		if (cookie.length > 0) {
+			sessions[key] = {...session, cookie};
+		} else if (typeof session?.secretId === "string" && session.secretId.length > 0) {
+			const rest = {...session};
+			delete rest.cookie;
+			sessions[key] = rest;
 		}
 	}
 	// 0.1.x: the single cookie belongs to the default server (the only server
@@ -186,6 +196,12 @@ export class HedgeSyncSettingTab extends PluginSettingTab {
 			.setName("Accounts")
 			.setDesc("Public notes work without an account. Private notes and changing permissions need one. Each account is only used for its own server.")
 			.setHeading();
+		containerEl.createEl("p", {
+			cls: "setting-item-description",
+			text: accounts.usesSecretStorage()
+				? "Session cookies are kept in Obsidian's secret storage, not in the plugin's data file. Sessions are checked, and thereby kept alive, in the background every few hours."
+				: `Session cookies are kept in this vault's plugin data file (${this.app.vault.configDir}/plugins/hedgesync/data.json); Obsidian 1.11.4 or newer keeps them in its secret storage instead. Sessions are checked, and thereby kept alive, in the background every few hours.`,
+		});
 
 		for (const account of accounts.list()) {
 			const {key, session} = account;

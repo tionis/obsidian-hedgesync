@@ -450,9 +450,22 @@ export class SyncManager {
 		const message = errorMessage(error);
 		console.error(`[hedgesync] ${source} sync failed for "${file.path}": ${message}`, error);
 		if (source === "bulk") return;
-		new Notice(source === "auto"
-			? `Auto push failed for "${file.basename}": ${message}`
-			: `Hedgesync: "${file.basename}": ${message}`);
+		void this.withAccessHint(error, file, message).then((text) => {
+			new Notice(source === "auto"
+				? `Auto push failed for "${file.basename}": ${text}`
+				: `Hedgesync: "${file.basename}": ${text}`, 10_000);
+		});
+	}
+
+	/** Add what to do about the account when the error is about access. */
+	private async withAccessHint(error: unknown, file: TFile, message: string): Promise<string> {
+		try {
+			const {reference} = await this.context(file);
+			const hint = await this.plugin.accounts.accessHint(error, reference.serverUrl);
+			return hint !== null ? `${message} ${hint}` : message;
+		} catch {
+			return message;
+		}
 	}
 }
 

@@ -4,8 +4,10 @@
  * removed again. A session is only ever sent to its own server.
  */
 
-import {App, Notice} from "obsidian";
+import {App, Notice, type Plugin} from "obsidian";
 import {normalizeCookie} from "hedgesync/obsidian";
+import type {CookieStore} from "./cookie-store";
+import {isAccessError} from "./errors";
 import type {HedgeDocService} from "./hedgedoc-service";
 import {loginWindowAvailable, logInWithWindow} from "./login";
 import {displayServer, serverKey, serverUrlProblem} from "./server-key";
@@ -20,8 +22,78 @@ interface AccountHost {
 
 export type Account = {key: string; session: StoredSession; isDefault: boolean};
 
+/** First background check after startup, then every few hours. */
+const STARTUP_CHECK_DELAY_MS = 30_000;
+const BACKGROUND_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+const ACCOUNTS_HINT = "Settings → Hedgesync → Accounts";
+
 export class AccountManager {
-	constructor(private readonly host: AccountHost, private readonly service: HedgeDocService) {}
+	private service!: HedgeDocService;
+
+	constructor(private readonly host: AccountHost, private readonly cookies: CookieStore) {}
+
+	/** The service needs this manager for cookies, so it is connected after construction. */
+	useService(service: HedgeDocService): void {
+		this.service = service;
+	}
+
+	/** The saved session cookie for a server. Never another server's. */
+	cookieFor(serverUrl: string): string | undefined {
+		const session = this.get(serverUrl);
+		return session !== undefined ? this.cookies.read(session) : undefined;
+	}
+
+	usesSecretStorage(): boolean {
+		return this.cookies.usesSecretStorage();
+	}
+
+	/** Move cookies out of data.json into Obsidian's secret storage, where available. */
+	async migrateCookies(): Promise<void> {
+		if (this.cookies.migrate(this.host.settings.sessions)) await this.host.saveSettings();
+	}
+
+	/**
+	 * Check every account shortly after startup and then periodically. Each
+	 * check is an authenticated request, which also renews the session
+	 * (HedgeDoc extends a session's lifetime whenever it is used).
+	 */
+	startBackgroundChecks(plugin: Plugin): void {
+		plugin.app.workspace.onLayoutReady(() => {
+			const timer = window.setTimeout(() => void this.checkAll(), STARTUP_CHECK_DELAY_MS);
+			plugin.register(() => window.clearTimeout(timer));
+		});
+		plugin.registerInterval(window.setInterval(() => void this.checkAll(), BACKGROUND_CHECK_INTERVAL_MS));
+	}
+
+	/** Check all accounts; tell the user once when a session has expired. */
+	async checkAll(): Promise<void> {
+		for (const key of Object.keys(this.host.settings.sessions)) {
+			const before = this.host.settings.sessions[key]?.status;
+			const session = await this.check(key);
+			if (session?.status === "expired" && before !== "expired") {
+				new Notice(`Your hedgedoc session on ${displayServer(key)} has expired. Log in again in ${ACCOUNTS_HINT}.`, 15_000);
+			}
+		}
+	}
+
+	/**
+	 * A hint for errors that look like missing access: whether to add an
+	 * account, log in again, or whether the account simply lacks access.
+	 * Null for other errors.
+	 */
+	async accessHint(error: unknown, serverUrl: string): Promise<string | null> {
+		if (!isAccessError(error)) return null;
+		const key = serverKey(serverUrl);
+		const server = displayServer(key);
+		if (this.host.settings.sessions[key] === undefined) {
+			return `You have no account for ${server}. Add one in ${ACCOUNTS_HINT} or with the command "Log in to hedgedoc".`;
+		}
+		const session = await this.check(key);
+		if (session?.status === "expired") return `Your session on ${server} has expired. Log in again in ${ACCOUNTS_HINT}.`;
+		const who = session?.user?.name;
+		return who !== undefined ? `You are logged in to ${server} as ${who}, but this account has no access.` : null;
+	}
 
 	/** Saved accounts, the default server's first. */
 	list(): Account[] {
@@ -82,8 +154,15 @@ export class AccountManager {
 	async check(key: string): Promise<StoredSession | undefined> {
 		const session = this.host.settings.sessions[key];
 		if (session === undefined) return undefined;
+		const cookie = this.cookies.read(session);
+		if (cookie === undefined) {
+			session.status = "expired";
+			session.checkedAt = new Date().toISOString();
+			await this.host.saveSettings();
+			return session;
+		}
 		try {
-			const user = await this.service.whoAmI(key, session.cookie);
+			const user = await this.service.whoAmI(key, cookie);
 			session.status = user !== null ? "ok" : "expired";
 			if (user !== null) session.user = user;
 			delete session.error;
@@ -107,6 +186,7 @@ export class AccountManager {
 				console.warn("[hedgesync] could not end the session on the server", error);
 			});
 		}
+		this.cookies.erase(session);
 		delete this.host.settings.sessions[key];
 		await this.host.saveSettings();
 	}
@@ -116,9 +196,19 @@ export class AccountManager {
 		new AccountModal(this.host.app, this, initialUrl, onDone).open();
 	}
 
-	private async store(serverUrl: string, session: Pick<StoredSession, "cookie" | "user" | "source">): Promise<void> {
+	private async store(serverUrl: string, login: {cookie: string; user: {id: string; name: string}; source: StoredSession["source"]}): Promise<void> {
+		const key = serverKey(serverUrl);
 		const now = new Date().toISOString();
-		this.host.settings.sessions[serverKey(serverUrl)] = {...session, savedAt: now, checkedAt: now, status: "ok"};
+		const session: StoredSession = {
+			user: login.user,
+			source: login.source,
+			savedAt: now,
+			checkedAt: now,
+			status: "ok",
+			secretId: this.host.settings.sessions[key]?.secretId,
+		};
+		this.cookies.write(key, session, login.cookie);
+		this.host.settings.sessions[key] = session;
 		await this.host.saveSettings();
 	}
 }

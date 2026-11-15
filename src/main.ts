@@ -2,6 +2,7 @@ import {Notice, Plugin, type TFile} from "obsidian";
 import {HedgeDocService} from "./hedgedoc-service";
 import {LiveSyncManager} from "./live/manager";
 import {AccountManager} from "./accounts";
+import {CookieStore} from "./cookie-store";
 import {
 	DEFAULT_SETTINGS,
 	type HedgeSyncPluginSettings,
@@ -22,8 +23,11 @@ export default class ObsidianHedgeSyncPlugin extends Plugin implements SettingsH
 	async onload(): Promise<void> {
 		await this.loadSettings();
 
-		this.service = new HedgeDocService(() => this.settings);
-		this.accounts = new AccountManager(this, this.service);
+		this.accounts = new AccountManager(this, new CookieStore(this.app));
+		this.service = new HedgeDocService(() => this.settings, (serverUrl) => this.accounts.cookieFor(serverUrl));
+		this.accounts.useService(this.service);
+		await this.accounts.migrateCookies();
+		this.accounts.startBackgroundChecks(this);
 		const live = new LiveSyncManager(this, this.service);
 		const sync = new SyncManager(this, this.service, live);
 		this.live = live;
