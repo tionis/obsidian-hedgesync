@@ -70,6 +70,18 @@ export function normalizeSettings(raw: Partial<HedgeSyncPluginSettings> & Legacy
 	};
 }
 
+/** Why a server URL is unusable, or null if it is fine (or empty). */
+function serverUrlProblem(value: string): string | null {
+	if (value.length === 0) return null;
+	try {
+		const url = new URL(value);
+		if (url.protocol === "https:" || url.protocol === "http:") return null;
+	} catch {
+		// fall through
+	}
+	return "Not a valid URL: use the full address, for example https://md.example.com.";
+}
+
 function coerceNumber(value: unknown, fallback: number, min: number, max: number): number {
 	if (typeof value !== "number" || !Number.isFinite(value)) {
 		return fallback;
@@ -101,9 +113,10 @@ export class HedgeSyncSettingTab extends PluginSettingTab {
 		containerEl.empty();
 		const settings = this.plugin.settings;
 
-		new Setting(containerEl)
+		const serverSetting = new Setting(containerEl)
 			.setName("Default hedgedoc server URL")
-			.setDesc("Used for new documents and for links that store only a note ID. Requires hedgedoc 1.10.4 or newer.")
+			.setDesc(serverUrlProblem(settings.defaultServerUrl)
+				?? "Used for new documents and for links that store only a note ID. Requires hedgedoc 1.10.4 or newer.")
 			.addText((text) => {
 				text
 					.setPlaceholder("https://md.example.com")
@@ -114,6 +127,7 @@ export class HedgeSyncSettingTab extends PluginSettingTab {
 					});
 				text.inputEl.addEventListener("blur", () => this.display());
 			});
+		if (serverUrlProblem(settings.defaultServerUrl) !== null) serverSetting.descEl.addClass("mod-warning");
 
 		this.displayAccount(containerEl);
 

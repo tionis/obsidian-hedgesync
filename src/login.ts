@@ -22,6 +22,11 @@ interface RemoteBrowserWindow {
 		session: {cookies: {get(filter: {url: string}): Promise<RemoteCookie[]>}};
 		getUserAgent(): string;
 		setUserAgent(userAgent: string): void;
+		getURL(): string;
+		isLoading(): boolean;
+		listenerCount(event: string): number;
+		removeAllListeners(event: string): void;
+		on(event: string, listener: (...args: unknown[]) => void): void;
 	};
 }
 
@@ -30,6 +35,7 @@ interface ElectronRemote {
 }
 
 const CHECK_INTERVAL_MS = 1500;
+const NAVIGATION_EVENTS = ["will-navigate", "will-frame-navigate", "will-redirect"];
 
 let remoteModule: ElectronRemote | null | undefined;
 
@@ -88,8 +94,22 @@ export function logInWithWindow(
 			sandbox: true,
 		},
 	});
+	const contents = win.webContents;
+	// Obsidian guards every new web contents against navigating away from the
+	// app. Those guards cancel the login page's navigations and redirects (the
+	// window stays white), and this window is not an Obsidian window.
+	for (const event of NAVIGATION_EVENTS) {
+		if (contents.listenerCount(event) > 0) contents.removeAllListeners(event);
+	}
 	// Some identity providers refuse embedded browsers that announce themselves.
-	win.webContents.setUserAgent(win.webContents.getUserAgent().replace(/\s(?:obsidian|Electron)\/\S+/gi, ""));
+	contents.setUserAgent(contents.getUserAgent().replace(/\s(?:obsidian|Electron)\/\S+/gi, ""));
+	// Diagnostics for the developer console: a login window that stays blank says nothing on its own.
+	contents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
+		// -3 (ERR_ABORTED) accompanies every redirect; subframe failures are not the page failing.
+		if (code === -3 || isMainFrame === false) return;
+		console.warn(`[hedgesync] login window failed to load ${String(url)}: ${String(description)} (${String(code)})`);
+	});
+	contents.on("did-finish-load", () => console.debug(`[hedgesync] login window loaded ${contents.getURL()}`));
 
 	return new Promise((resolve) => {
 		let finished = false;
@@ -119,8 +139,18 @@ export function logInWithWindow(
 
 		const timer = window.setInterval(() => void check(), CHECK_INTERVAL_MS);
 		win.on("closed", () => finish(null));
-		win.loadURL(`${base}/`).catch((error: unknown) => {
+		const start = `${base}/`;
+		win.loadURL(start).catch((error: unknown) => {
 			console.error("[hedgesync] login window failed to load", error);
 		});
+		// If something still swallowed the first load, try once more.
+		window.setTimeout(() => {
+			if (finished || win.isDestroyed()) return;
+			const current = contents.getURL();
+			if ((current === "" || current === "about:blank") && !contents.isLoading()) {
+				console.warn("[hedgesync] login window stalled; loading again");
+				win.loadURL(start).catch((error: unknown) => console.error("[hedgesync] login window failed to load", error));
+			}
+		}, 3000);
 	});
 }

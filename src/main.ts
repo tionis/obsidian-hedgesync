@@ -65,7 +65,8 @@ export default class ObsidianHedgeSyncPlugin extends Plugin implements SettingsH
 	}
 
 	async saveSettings(): Promise<void> {
-		this.settings = normalizeSettings(this.settings);
+		// Normalize in place: the settings tab and services hold this object.
+		Object.assign(this.settings, normalizeSettings(this.settings));
 		await this.saveData(this.settings);
 	}
 
@@ -87,6 +88,10 @@ export default class ObsidianHedgeSyncPlugin extends Plugin implements SettingsH
 	}
 
 	async logIn(serverUrl: string): Promise<void> {
+		if (!isHttpUrl(serverUrl)) {
+			new Notice(`"${serverUrl}" is not a valid server URL. Use the full address, for example https://md.example.com.`);
+			return;
+		}
 		try {
 			const result = await logInWithWindow(serverUrl, (cookie) => this.service.whoAmI(serverUrl, cookie));
 			if (result === null) return;
@@ -132,5 +137,14 @@ export default class ObsidianHedgeSyncPlugin extends Plugin implements SettingsH
 		delete this.settings.sessions[key];
 		await this.saveSettings();
 		new Notice(`Logged out of ${serverKey(serverUrl)}.`);
+	}
+}
+
+function isHttpUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return url.protocol === "https:" || url.protocol === "http:";
+	} catch {
+		return false;
 	}
 }
