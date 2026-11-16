@@ -1,4 +1,5 @@
 import {Notice, Plugin, type TFile} from "obsidian";
+import {registerBrowseCommand} from "./browse/browse-command";
 import {HedgeDocService} from "./hedgedoc-service";
 import {LiveSyncManager} from "./live/manager";
 import {AccountManager} from "./accounts";
@@ -33,6 +34,7 @@ export default class ObsidianHedgeSyncPlugin extends Plugin implements SettingsH
 		this.sync = sync;
 		live.register();
 		sync.register();
+		registerBrowseCommand(this, this.service, this.accounts, sync);
 
 		const statusBar = new LiveStatusBar(
 			this.addStatusBarItem(),

@@ -5,7 +5,8 @@
 
 import {Menu, normalizePath, Notice, TAbstractFile, TFile} from "obsidian";
 import {buildNoteUrl, parseNoteUrl} from "hedgesync/obsidian";
-import {HedgeDocReferenceError, resolveHedgeDocReference} from "./frontmatter";
+import type {LinkedNote} from "./browse/catalog";
+import {HedgeDocReferenceError, resolveHedgeDocReference, resolveReferenceValue} from "./frontmatter";
 import type {HedgeDocService} from "./hedgedoc-service";
 import type {LiveSyncManager} from "./live/manager";
 import type ObsidianHedgeSyncPlugin from "./main";
@@ -367,17 +368,40 @@ export class SyncManager {
 		try {
 			const reference = this.referenceFromInput(input.referenceInput);
 			const body = await this.service.pull(reference);
-			const path = this.availablePath(input.targetPath.length > 0 ? input.targetPath : `${folderPrefix}${reference.noteId}.md`);
-			const key = this.plugin.settings.frontmatterLinkProperty;
-			// The body must be exactly the remote text, or the note starts out of sync.
-			const file = await app.vault.create(path, `---\n${key}: ${JSON.stringify(reference.url)}\n---\n${body}`);
-			this.lastSynced.set(file.path, body);
+			const file = await this.createLinkedNote(reference, input.targetPath.length > 0 ? input.targetPath : `${folderPrefix}${reference.noteId}.md`, body);
 			await app.workspace.getLeaf(true).openFile(file);
 			new Notice(`Created "${file.basename}" from hedgedoc.`);
 		} catch (error) {
 			console.error("[hedgesync] import failed", error);
 			new Notice(`Could not create a note from hedgedoc: ${errorMessage(error)}`);
 		}
+	}
+
+	/** Create a vault note at `path` (or the next free name) linked to `reference`, holding `body`. */
+	async createLinkedNote(reference: HedgeDocReference, path: string, body: string): Promise<TFile> {
+		const target = this.availablePath(path);
+		const key = this.plugin.settings.frontmatterLinkProperty;
+		// The body must be exactly the remote text, or the note starts out of sync.
+		const file = await this.plugin.app.vault.create(target, `---\n${key}: ${JSON.stringify(reference.url)}\n---\n${body}`);
+		this.lastSynced.set(file.path, body);
+		return file;
+	}
+
+	/** Every vault note with a valid link, and the note it links to. */
+	linkedNotes(): LinkedNote[] {
+		const property = this.plugin.settings.frontmatterLinkProperty;
+		const linked: LinkedNote[] = [];
+		for (const file of this.plugin.app.vault.getMarkdownFiles()) {
+			const value: unknown = this.plugin.app.metadataCache.getFileCache(file)?.frontmatter?.[property];
+			if (value === undefined || value === null || value === "") continue;
+			try {
+				const reference = resolveReferenceValue(value, this.plugin.settings.defaultServerUrl);
+				linked.push({path: file.path, serverUrl: reference.serverUrl, noteId: reference.noteId});
+			} catch {
+				// An invalid link points nowhere.
+			}
+		}
+		return linked;
 	}
 
 	private referenceFromInput(input: string): HedgeDocReference {

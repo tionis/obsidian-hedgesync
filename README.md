@@ -18,6 +18,7 @@ Hedgesync maps each Obsidian note to one HedgeDoc document through a configurabl
 - Copy or open the published page (`/s/...`) and slide link of a note.
 - Change who can view and edit a note (for notes you own).
 - Pull all linked notes across the vault, keeping local frontmatter.
+- Browse the notes you have opened on a server, see which are already in your vault, and import the rest.
 - Optional auto-push when linked notes change.
 
 ## Requirements
@@ -93,6 +94,7 @@ Only the text below the frontmatter is synchronized; the frontmatter stays in Ob
 - `Create hedgedoc document from active note`
 - `Create note from hedgedoc document`
 - `Pull all linked notes from hedgedoc`
+- `Browse hedgedoc notes`
 - `Log in to hedgedoc`
 
 Assign keyboard shortcuts in **Settings → Hotkeys**.
@@ -106,6 +108,15 @@ While live sync is on, the open editor and the HedgeDoc document stay identical:
 - **Cursors**: other people's cursors appear as colored carets; their name shows briefly when they move and when you hover the line. Your cursor is shown to them while your editor has focus, except inside the front matter, which only you see. HedgeDoc shares cursors but not selections.
 - **Read-only notes**: if you are not allowed to edit the note, remote changes still arrive, but local changes are not sent.
 - **Start automatically**: with this setting on, live sync starts when you open a linked note and stops when you close its last tab.
+
+## Browse notes on a server
+
+**Browse hedgedoc notes** lists the notes in your HedgeDoc history on a server: the notes you have opened there while logged in (HedgeDoc has no list of all notes you can access). It needs an account for that server.
+
+- Each note shows when you last opened it, its tags, and the vault notes linked to it, or **Not in the vault**.
+- Search by title, tag or vault path, and turn on **Only notes not in the vault** to see what is missing.
+- **Import** creates a linked note in **Folder for new notes**, named after the note's title; **Import N** imports every listed note that is not in the vault. **Open** opens the linked vault note.
+- A vault note counts as linked when its frontmatter link uses the same note ID as the history: the ID in the note's address in HedgeDoc (its alias, or the long generated ID). A link written with a different form of the ID, such as the raw UUID, is not recognized.
 
 ## Accounts
 

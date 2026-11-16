@@ -83,7 +83,8 @@ function parseFrontmatter(frontmatterBlock: string | null): Record<string, unkno
 	return parsedYaml;
 }
 
-function resolveReferenceValue(value: unknown, defaultServerUrl: string): HedgeDocReference {
+/** The reference a frontmatter link value (string or object) points to; throws if invalid. */
+export function resolveReferenceValue(value: unknown, defaultServerUrl: string): HedgeDocReference {
 	if (typeof value === "string") {
 		const trimmedValue = value.trim();
 		if (isHttpUrl(trimmedValue)) {

@@ -8,6 +8,7 @@ import {
 	normalizeCookie,
 	HedgeDocAPI,
 	HedgeDocClient,
+	type HistoryEntry,
 	type NoteLinks,
 	type HedgeSyncRequestFn,
 } from "hedgesync/obsidian";
@@ -106,6 +107,13 @@ export class HedgeDocService {
 	/** Note owner and current permission. */
 	noteInfo(reference: HedgeDocReference): Promise<{permission: string; owner: string | null}> {
 		return this.withClient(reference, (client) => ({permission: client.noteInfo.permission, owner: client.noteInfo.owner}));
+	}
+
+	/** Notes the logged-in user has opened on a server (HedgeDoc's history). */
+	async history(serverUrl: string): Promise<HistoryEntry[]> {
+		if (this.cookieFor(serverUrl) === undefined) throw new Error("Log in to this server to see your notes on it.");
+		const result = await this.api(serverUrl).getHistory();
+		return Array.isArray(result?.history) ? result.history : [];
 	}
 
 	/** Who a cookie belongs to on a server; null for an anonymous or expired session. */
