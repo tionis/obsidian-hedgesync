@@ -47,6 +47,8 @@ function browseHost(plugin: Plugin, service: HedgeDocService, accounts: AccountM
 			const file = await sync.createLinkedNote(reference, folderPath.length > 0 ? `${folderPath}/${name}` : name, body);
 			return file.path;
 		},
+		setPinned: (serverUrl, noteId, pinned) => service.setPinned(serverUrl, noteId, pinned),
+		visit: (serverUrl, link) => service.visit({serverUrl, noteId: link.noteId, url: buildNoteUrl(serverUrl, link.noteId)}),
 		defaultFolder: () => {
 			const parent = app.fileManager.getNewFileParent(app.workspace.getActiveFile()?.path ?? "");
 			return parent.isRoot() ? "" : parent.path;

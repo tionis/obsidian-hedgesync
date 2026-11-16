@@ -162,3 +162,23 @@
 	padding: var(--size-4-4) 0;
 	text-align: center;
 }
+
+.hedgesync-browse-untracked {
+	margin-top: var(--size-4-3);
+}
+
+.hedgesync-browse-untracked > summary {
+	cursor: var(--cursor);
+	color: var(--text-warning);
+	font-size: var(--font-ui-small);
+}
+
+.hedgesync-browse-hint {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	padding: var(--size-4-2) 0;
+}
+
+.hedgesync-browse-add-all {
+	margin-top: var(--size-4-2);
+}

@@ -42,6 +42,24 @@ export function buildCatalog(serverUrl: string, notes: RemoteNote[], linked: Lin
 		.sort((a, b) => Number(b.note.pinned) - Number(a.note.pinned) || b.note.time - a.note.time);
 }
 
+/** Vault notes linked to a note on this server that is not in the history, sorted by path. */
+export function linkedNotInHistory(serverUrl: string, notes: RemoteNote[], linked: LinkedNote[]): LinkedNote[] {
+	const key = serverKey(serverUrl);
+	const ids = new Set(notes.map((note) => note.id));
+	return linked
+		.filter((link) => serverKey(link.serverUrl) === key && !ids.has(link.noteId))
+		.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** Linked vault notes whose path or note ID contains every word of the search. */
+export function filterLinked(linked: LinkedNote[], query: string): LinkedNote[] {
+	const words = query.toLowerCase().split(/\s+/).filter((word) => word.length > 0);
+	return linked.filter((link) => {
+		const haystack = `${link.path}\n${link.noteId}`.toLowerCase();
+		return words.every((word) => haystack.includes(word));
+	});
+}
+
 export interface CatalogFilter {
 	query: string;
 	onlyMissing: boolean;

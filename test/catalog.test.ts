@@ -1,6 +1,6 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
-import {buildCatalog, fileNameFor, filterCatalog, type RemoteNote} from "../src/browse/catalog";
+import {buildCatalog, fileNameFor, filterCatalog, filterLinked, linkedNotInHistory, type RemoteNote} from "../src/browse/catalog";
 
 const note = (id: string, text: string, time: number, extra: Partial<RemoteNote> = {}): RemoteNote => ({id, text, time, tags: [], pinned: false, ...extra});
 
@@ -32,4 +32,16 @@ test("file names drop unsafe characters and fall back to the note ID", () => {
 	assert.equal(fileNameFor(note("x", "...hidden", 0)), "hidden");
 	assert.equal(fileNameFor(note("x1", "Untitled", 0)), "x1");
 	assert.equal(fileNameFor(note("x2", " / ", 0)), "x2");
+});
+
+test("finds vault notes on the server that are missing from the history", () => {
+	const linked = [
+		{path: "b.md", serverUrl: "https://md.example.com", noteId: "gone"},
+		{path: "a.md", serverUrl: "https://md.example.com/", noteId: "never-opened"},
+		{path: "c.md", serverUrl: "https://md.example.com", noteId: "known"},
+		{path: "d.md", serverUrl: "https://other.example.com", noteId: "elsewhere"},
+	];
+	const missing = linkedNotInHistory("https://md.example.com", [note("known", "Known", 1)], linked);
+	assert.deepEqual(missing.map((link) => link.path), ["a.md", "b.md"]);
+	assert.deepEqual(filterLinked(missing, "GONE").map((link) => link.path), ["b.md"]);
 });

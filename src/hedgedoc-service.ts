@@ -116,6 +116,16 @@ export class HedgeDocService {
 		return Array.isArray(result?.history) ? result.history : [];
 	}
 
+	setPinned(serverUrl: string, noteId: string, pinned: boolean): Promise<void> {
+		return this.api(serverUrl).setHistoryPinned(noteId, pinned);
+	}
+
+	/** Open the note as the logged-in user, which makes HedgeDoc add it to their history. */
+	async visit(reference: HedgeDocReference): Promise<void> {
+		if (this.cookieFor(reference.serverUrl) === undefined) throw new Error("Log in to this server first.");
+		await this.withClient(reference, () => undefined);
+	}
+
 	/** Who a cookie belongs to on a server; null for an anonymous or expired session. */
 	async whoAmI(serverUrl: string, cookie = this.cookieFor(serverUrl)): Promise<{id: string; name: string} | null> {
 		if (cookie === undefined) return null;

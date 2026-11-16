@@ -18,7 +18,7 @@ Hedgesync maps each Obsidian note to one HedgeDoc document through a configurabl
 - Copy or open the published page (`/s/...`) and slide link of a note.
 - Change who can view and edit a note (for notes you own).
 - Pull all linked notes across the vault, keeping local frontmatter.
-- Browse the notes you have opened on a server, see which are already in your vault, and import the rest.
+- Browse the notes you have opened on a server, see which are already in your vault, and import the rest; find linked vault notes missing from your server history.
 - Optional auto-push when linked notes change.
 
 ## Requirements
@@ -116,6 +116,8 @@ While live sync is on, the open editor and the HedgeDoc document stay identical:
 - Each note shows when you last opened it, its tags, and the vault notes linked to it, or **Not in the vault**.
 - Search by title, tag or vault path, and turn on **Only notes not in the vault** to see what is missing.
 - **Import** creates a linked note in **Folder for new notes**, named after the note's title; **Import N** imports every listed note that is not in the vault. **Open** opens the linked vault note.
+- **Pin** or **Unpin** a note in your HedgeDoc history (pinned notes are listed first, here and in HedgeDoc).
+- Below the list, **linked vault notes not in your history** shows vault notes linked to this server that the history does not list. **Add to history** opens the note on the server as you, which makes HedgeDoc add it to your history; **Add N to history** does this for all of them. If a note still does not appear, it was deleted, you have no access, or its link uses a different form of the ID (see below).
 - A vault note counts as linked when its frontmatter link uses the same note ID as the history: the ID in the note's address in HedgeDoc (its alias, or the long generated ID). A link written with a different form of the ID, such as the raw UUID, is not recognized.
 
 ## Accounts
