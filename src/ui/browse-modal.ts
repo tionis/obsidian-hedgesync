@@ -1,5 +1,5 @@
 import {App, type ButtonComponent, Modal, moment, Notice, Setting, setIcon} from "obsidian";
-import {buildCatalog, type CatalogEntry, filterCatalog, filterLinked, type LinkedNote, linkedNotInHistory, type RemoteNote} from "../browse/catalog";
+import {buildCatalog, type CatalogEntry, filterCatalog, filterLinked, type LinkedNote, linkedNotInHistory, mergeLinked, type RemoteNote} from "../browse/catalog";
 import {displayServer} from "../server-key";
 import {renderUntracked} from "./browse-untracked";
 import {requestConfirmation} from "./confirmation-modal";
@@ -30,6 +30,12 @@ export class BrowseModal extends Modal {
 	private notes: RemoteNote[] | null = null;
 	private entries: CatalogEntry[] = [];
 	private untracked: LinkedNote[] = [];
+	/**
+	 * Notes imported while the modal is open. The metadata cache indexes a new
+	 * file's frontmatter only after a moment, so until then these would look
+	 * missing and could be imported twice.
+	 */
+	private readonly imported: LinkedNote[] = [];
 	private query = "";
 	private onlyMissing = false;
 	private folder: string;
@@ -134,7 +140,7 @@ export class BrowseModal extends Modal {
 	/** Recompute which notes are in the vault, e.g. after an import. */
 	private refreshEntries(): void {
 		if (this.notes === null) return;
-		const linked = this.host.linkedNotes();
+		const linked = mergeLinked(this.host.linkedNotes(), this.imported);
 		this.entries = buildCatalog(this.serverUrl, this.notes, linked);
 		this.untracked = linkedNotInHistory(this.serverUrl, this.notes, linked);
 		this.renderList();
@@ -210,6 +216,7 @@ export class BrowseModal extends Modal {
 		button.disabled = true;
 		try {
 			const path = await this.host.importNote(this.serverUrl, note, this.folder, false);
+			this.imported.push({path, serverUrl: this.serverUrl, noteId: note.id});
 			new Notice(`Imported "${note.text || note.id}" to ${path}.`);
 		} catch (error) {
 			console.error("[hedgesync] import failed", error);
@@ -314,7 +321,8 @@ export class BrowseModal extends Modal {
 		try {
 			for (const note of missing) {
 				try {
-					await this.host.importNote(this.serverUrl, note, this.folder, true);
+					const path = await this.host.importNote(this.serverUrl, note, this.folder, true);
+					this.imported.push({path, serverUrl: this.serverUrl, noteId: note.id});
 					imported++;
 				} catch (error) {
 					failed++;

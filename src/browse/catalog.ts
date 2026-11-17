@@ -42,6 +42,12 @@ export function buildCatalog(serverUrl: string, notes: RemoteNote[], linked: Lin
 		.sort((a, b) => Number(b.note.pinned) - Number(a.note.pinned) || b.note.time - a.note.time);
 }
 
+/** The vault's links plus extra ones (e.g. just created, not yet indexed), one per path. */
+export function mergeLinked(linked: LinkedNote[], extra: LinkedNote[]): LinkedNote[] {
+	const known = new Set(linked.map((link) => link.path));
+	return [...linked, ...extra.filter((link) => !known.has(link.path))];
+}
+
 /** Vault notes linked to a note on this server that is not in the history, sorted by path. */
 export function linkedNotInHistory(serverUrl: string, notes: RemoteNote[], linked: LinkedNote[]): LinkedNote[] {
 	const key = serverKey(serverUrl);

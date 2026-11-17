@@ -1,6 +1,6 @@
 import {strict as assert} from "node:assert";
 import {test} from "node:test";
-import {buildCatalog, fileNameFor, filterCatalog, filterLinked, linkedNotInHistory, type RemoteNote} from "../src/browse/catalog";
+import {buildCatalog, fileNameFor, filterCatalog, filterLinked, linkedNotInHistory, mergeLinked, type RemoteNote} from "../src/browse/catalog";
 
 const note = (id: string, text: string, time: number, extra: Partial<RemoteNote> = {}): RemoteNote => ({id, text, time, tags: [], pinned: false, ...extra});
 
@@ -44,4 +44,13 @@ test("finds vault notes on the server that are missing from the history", () => 
 	const missing = linkedNotInHistory("https://md.example.com", [note("known", "Known", 1)], linked);
 	assert.deepEqual(missing.map((link) => link.path), ["a.md", "b.md"]);
 	assert.deepEqual(filterLinked(missing, "GONE").map((link) => link.path), ["b.md"]);
+});
+
+test("a note just imported counts as in the vault before the metadata cache knows it", () => {
+	const imported = [{path: "Title.md", serverUrl: "https://md.example.com", noteId: "a"}];
+	const before = buildCatalog("https://md.example.com", [note("a", "Title", 1)], mergeLinked([], imported));
+	assert.deepEqual(before[0]?.paths, ["Title.md"]);
+	// Once indexed, the same file is not listed twice.
+	const after = buildCatalog("https://md.example.com", [note("a", "Title", 1)], mergeLinked(imported, imported));
+	assert.deepEqual(after[0]?.paths, ["Title.md"]);
 });
